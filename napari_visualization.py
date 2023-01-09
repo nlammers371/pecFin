@@ -18,11 +18,11 @@ image_node = nodes[0]
 image_data = image_node.data
 
 # pull second-smallest image and experiment
-im_3 = np.asarray(image_data[2])
+im_3 = np.asarray(image_data[0])
 # calculate upper resolution limit for display
 res_upper = np.percentile(im_3[0,:,:,:],99.999)
 
-viewer = napari.view_image(image_data[2], channel_axis=0, contrast_limits=[0, res_upper])
+viewer = napari.view_image(image_data[0], channel_axis=0, contrast_limits=[0, res_upper])
 
 if __name__ == '__main__':
     napari.run()

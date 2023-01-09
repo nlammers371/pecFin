@@ -1,0 +1,3 @@
+[submodule "fractal-tasks-core"]
+	path = fractal-tasks-core
+	url = https://github.com/fractal-analytics-platform/fractal-tasks-core.git
