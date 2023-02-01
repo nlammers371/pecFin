@@ -7,6 +7,7 @@ import shutil
 from pathlib import Path
 from pathlib import Path
 from typing import Any
+from ome_zarr.reader import Reader
 from typing import Dict
 import time
 from typing import List
@@ -17,7 +18,7 @@ import zarr
 from ome_zarr.io import parse_url
 from ome_zarr.writer import write_image
 from anndata.experimental import write_elem
-
+import skimage.io
 import fractal_tasks_core
 
 import glob2 as glob
@@ -129,11 +130,14 @@ def parse_experiment_name(f_name):
     return gene_list, wvl_list
 
 
-def write_to_ome_zarr(project_directory, write_directory, num_levels=5, coarsening_factor=2, match_string='*', overwrite=False):
+def write_to_ome_zarr(project_directory, write_directory, write_tiff=False, test_flag=False, num_levels=5, coarsening_factor=2, match_string='*', overwrite=False):
     """
 
     :param project_directory: [string] Path to folder containing experiment subfolders
+    :param write_directory: [string] Path to destination folder
+    :param write_tiff: [Logical] If true, code will also generate standard tiff stacks
     :param num_levels: [int] Number of coarse-graining levels to include in ome-zarr pyramid
+    :param test_flag [logical] if true, data will be downsampled and saved to test directory
     :param coarsening_factor:  [int] Factor by which each successive level is downsampled
     :param match_string: [string] String to specify subset of folders within directory via string matching
     :param overwrite: [logical] Logical indicating whether or not to overwrite exisiting files. If False, code will skip to next file
@@ -222,7 +226,10 @@ def write_to_ome_zarr(project_directory, write_directory, num_levels=5, coarseni
                 channel_dict_list.append(dict_entry)
 
             # Define image zarr
-            outDir = write_directory + '/built_zarr_files/'
+            if test_flag:
+                outDir = write_directory + '/built_zarr_files_testing/'
+            else:
+                outDir = write_directory + '/built_zarr_files/'
             zarrurl = f"{outDir + image_name}.zarr"
 
             skip_flag = True
@@ -243,6 +250,10 @@ def write_to_ome_zarr(project_directory, write_directory, num_levels=5, coarseni
             else:
                 skip_flag = False
 
+            # extract "top level" dimensions for pixel size calculations
+            dask_data = dask.array.squeeze(imObject.dask_data)
+            if test_flag:
+                dask_data = dask_data[:, 75:105, 900:1412, 900:1412]
             if not skip_flag:
                 if os.path.isdir(zarrurl):
                    shutil.rmtree(zarrurl)
@@ -253,9 +264,6 @@ def write_to_ome_zarr(project_directory, write_directory, num_levels=5, coarseni
                 store = parse_url(zarrurl, mode="w").store
                 root = zarr.group(store=store)
 
-                # extract "top level" dimensions for pixel size calculations
-                dask_data = dask.array.squeeze(imObject.dask_data)
-                dask_data = dask_data[:, :, :256, :256]
                 spatial_dims = dask_data.shape
                 spatial_dims = spatial_dims[1:]
 
@@ -339,6 +347,49 @@ def write_to_ome_zarr(project_directory, write_directory, num_levels=5, coarseni
                 print(f"WARNING: {zarrurl} already exists. Skipping. Set overwrite=1 to overwrite")
                 # raise Warning(f"WARNING: {zarrurl} already exists. Skipping. Set overwrite=1 to overwrite")
 
+            # write tiff if desired
+            if write_tiff:
+                if test_flag:
+                    tiffDir = write_directory + '/built_tiff_files_testing/'
+                else:
+                    tiffDir = write_directory + '/built_tiff_files/'
+
+                filename = tiffDir + image_name
+                if not os.path.isfile(filename) or overwrite:
+                    np.random.seed(234)
+
+                    if not os.path.isdir(tiffDir):
+                        os.makedirs(tiffDir)
+
+                    # load dopwn-sampled data
+                    reader = Reader(parse_url(zarrurl))
+
+                    # nodes may include images, labels etc
+                    nodes = list(reader())
+
+                    # first node will be the image pixel data
+                    image_node = nodes[0]
+                    np_data = np.asarray(image_node.data[1][3, :, :, :])
+
+                    # save full image
+                    skimage.io.imsave(filename + '.tiff', np_data)
+
+                    logger.info(f"Creating {image_name} DAPI.tiff")
+
+                    # save one XY, YZ, & XZ
+                    zi = np.random.randint(0, np_data.shape[0])
+                    xy_data = np_data[zi, :, :]
+                    yi = np.random.randint(0, np_data.shape[1])
+                    xz_data = np.squeeze(np_data[:, yi, :])
+                    xi = np.random.randint(0, np_data.shape[2])
+                    yz_data = np.squeeze(np_data[:, :, xi])
+
+                    # save slices
+                    skimage.io.imsave(filename + 'xy.tiff', xy_data)
+                    skimage.io.imsave(filename + 'xz.tiff', xz_data)
+                    skimage.io.imsave(filename + 'yz.tiff', yz_data)
+
+
             now = time.time()
             print("It has been {0} seconds since the loop started".format(now - program_starts))
 
@@ -356,11 +407,12 @@ if __name__ == '__main__':
     # set parameters
     num_levels = 5
     coarsening_factor = 2
-
+    test_flag = True
+    make_tiffs = True
     # set paths to raw data
     project_directory = "/Users/nick/Dropbox (Cole Trapnell's Lab)/Nick/pecFin/HCR_Data/raw/"
     # set write paths
-    write_directory = "/Users/nick/Dropbox (Cole Trapnell's Lab)/Nick/pecFin/HCR_Data_small"
+    write_directory = "/Users/nick/Dropbox (Cole Trapnell's Lab)/Nick/pecFin/HCR_Data"
 
     # call main function
-    write_to_ome_zarr(project_directory, write_directory)
+    write_to_ome_zarr(project_directory, write_directory, overwrite=True, test_flag=test_flag, write_tiff=make_tiffs)
