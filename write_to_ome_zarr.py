@@ -4,6 +4,7 @@ import numpy as np
 from aicsimageio import AICSImage
 import dask
 import shutil
+from skimage.transform import resize
 from pathlib import Path
 from pathlib import Path
 from typing import Any
@@ -227,7 +228,7 @@ def write_to_ome_zarr(project_directory, write_directory, write_tiff=False, test
 
             # Define image zarr
             if test_flag:
-                outDir = write_directory + '/built_zarr_files_testing/'
+                outDir = write_directory + '/built_zarr_files_testing2/'
             else:
                 outDir = write_directory + '/built_zarr_files/'
             zarrurl = f"{outDir + image_name}.zarr"
@@ -253,7 +254,7 @@ def write_to_ome_zarr(project_directory, write_directory, write_tiff=False, test
             # extract "top level" dimensions for pixel size calculations
             dask_data = dask.array.squeeze(imObject.dask_data)
             if test_flag:
-                dask_data = dask_data[:, 75:105, 900:1412, 900:1412]
+                dask_data = dask_data[:, 60:120, 900:1412, 900:1412]
             if not skip_flag:
                 if os.path.isdir(zarrurl):
                    shutil.rmtree(zarrurl)
@@ -284,9 +285,6 @@ def write_to_ome_zarr(project_directory, write_directory, write_tiff=False, test
                                 ]
                             for ind_level in range(num_levels)
                         ],
-
-                trans_list = trans_list[0]
-
 
                 root.attrs["omero"] = {
                             "id": 1,  # NL: uncertain as to what this is meant to do
@@ -350,17 +348,22 @@ def write_to_ome_zarr(project_directory, write_directory, write_tiff=False, test
             # write tiff if desired
             if write_tiff:
                 if test_flag:
-                    tiffDir = write_directory + '/built_tiff_files_testing/'
+                    tiffDir = write_directory + '/built_tiff_files_testing2/'
+                    trainDir = write_directory + '/tiff_training_slices_testing2/'
                 else:
                     tiffDir = write_directory + '/built_tiff_files/'
+                    trainDir = write_directory + '/tiff_training_slices/'
 
                 filename = tiffDir + image_name
-                if not os.path.isfile(filename) or overwrite:
+                trainname = trainDir + image_name
+                if True: #not os.path.isfile(filename) or overwrite:
                     np.random.seed(234)
 
                     if not os.path.isdir(tiffDir):
                         os.makedirs(tiffDir)
 
+                    if not os.path.isdir(trainDir):
+                        os.makedirs(trainDir)
                     # load dopwn-sampled data
                     reader = Reader(parse_url(zarrurl))
 
@@ -381,13 +384,18 @@ def write_to_ome_zarr(project_directory, write_directory, write_tiff=False, test
                     xy_data = np_data[zi, :, :]
                     yi = np.random.randint(0, np_data.shape[1])
                     xz_data = np.squeeze(np_data[:, yi, :])
+                    # upsample z to roughly isometric space
+                    us_factor = np.round(pixel_size_z / (pixel_size_y*coarsening_factor) * xz_data.shape[0])
+                    xz_us = resize(xz_data, (us_factor, xz_data.shape[1]), order=0,
+                                          preserve_range=True)
                     xi = np.random.randint(0, np_data.shape[2])
                     yz_data = np.squeeze(np_data[:, :, xi])
-
+                    yz_us = resize(xz_data, (us_factor, yz_data.shape[1]), order=0,
+                                   preserve_range=True)
                     # save slices
-                    skimage.io.imsave(filename + 'xy.tiff', xy_data)
-                    skimage.io.imsave(filename + 'xz.tiff', xz_data)
-                    skimage.io.imsave(filename + 'yz.tiff', yz_data)
+                    skimage.io.imsave(trainname + 'xy.tiff', xy_data)
+                    skimage.io.imsave(trainname + 'xz.tiff', xz_us)
+                    skimage.io.imsave(trainname + 'yz.tiff', yz_us)
 
 
             now = time.time()
@@ -415,4 +423,4 @@ if __name__ == '__main__':
     write_directory = "/Users/nick/Dropbox (Cole Trapnell's Lab)/Nick/pecFin/HCR_Data"
 
     # call main function
-    write_to_ome_zarr(project_directory, write_directory, overwrite=True, test_flag=test_flag, write_tiff=make_tiffs)
+    write_to_ome_zarr(project_directory, write_directory, overwrite=False, test_flag=test_flag, write_tiff=make_tiffs)

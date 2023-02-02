@@ -5,9 +5,9 @@ import numpy as np
 
 # set parameters
 filename = "2022_12_15 HCR Hand2 Tbx5a Fgf10a_1.zarr"
-readPath = "/Users/nick/Dropbox (Cole Trapnell's Lab)/Nick/pecFin/HCR_Data/built_zarr_files_testing/" + filename
-readPathLabels = "/Users/nick/Dropbox (Cole Trapnell's Lab)/Nick/pecFin/HCR_Data/built_zarr_files_testing/" + filename + "labels"
-level = 0
+readPath = "/Users/nick/Dropbox (Cole Trapnell's Lab)/Nick/pecFin/HCR_Data/built_zarr_files_testing2/" + filename
+readPathLabels = "/Users/nick/Dropbox (Cole Trapnell's Lab)/Nick/pecFin/HCR_Data/built_zarr_files_testing2/" + filename + "labels"
+level = 1
 
 #############
 # Main image
@@ -49,10 +49,15 @@ dataset_info = multiscale_attrs[0]['datasets']  # list containing scale factors 
 # pull second-smallest image and experiment
 im_3 = np.asarray(image_data[level])
 # calculate upper resolution limit for display
-res_upper = np.percentile(im_3[0, :, :, :], 99.999)
+res_upper = np.percentile(im_3[3, :, :, :], 99.999)
+# extract useful info
+scale_vec = multiscale_attrs[0]["datasets"][level]["coordinateTransformations"][0]["scale"]
+channel_names = [channel_metadata[i]["label"] for i in range(len(channel_metadata))]
+colormaps = [channel_metadata[i]["color"] for i in range(len(channel_metadata))]
 
-viewer = napari.view_image(image_data[level], channel_axis=0, contrast_limits=[0, res_upper], scale=multiscale_attrs[0]["datasets"][level]["coordinateTransformations"][0]["scale"])
-labels_layer = viewer.add_labels(label_data[level], name='segmentation', scale=multiscale_attrs[0]["datasets"][level]["coordinateTransformations"][0]["scale"])
+
+viewer = napari.view_image(image_data[level], channel_axis=0, name=channel_names, colormap=colormaps, contrast_limits=[0, res_upper], scale=scale_vec)
+labels_layer = viewer.add_labels(label_data[level], name='segmentation', scale=scale_vec)
 
 if __name__ == '__main__':
     napari.run()

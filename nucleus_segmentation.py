@@ -32,7 +32,7 @@ from typing import Dict
 from typing import Literal
 from typing import Optional
 from typing import Sequence
-
+from skimage.measure import label
 import anndata as ad
 import dask.array as da
 import numpy as np
@@ -119,9 +119,9 @@ def segment_FOV(
             column,
             channels=[0, 0],
             do_3D=do_3D,
+            min_size=min_size,
             net_avg=False,
-            augment=False,
-            anisotropy=anisotropy,
+            augment=False
         )
     if not do_3D:
         mask = np.expand_dims(mask, axis=0)
@@ -185,7 +185,7 @@ def cellpose_segmentation(
 
     # Read useful parameters from metadata
     coarsening_xy = 2 #NL: need to store this in metadata
-
+    min_size = (diameter_level0/coarsening_xy)**2
     # Preliminary check
     if seg_channel_label is None:
         raise ValueError(
@@ -195,7 +195,7 @@ def cellpose_segmentation(
     # get list of images
     image_list = sorted(glob.glob(zarr_directory + "*.zarr"))
 
-    for im in range(len(image_list)):
+    for im in [0]:#range(len(image_list)):
         zarrurl = image_list[im]
         # read the image data
         store = parse_url(zarrurl, mode="r").store
@@ -238,10 +238,13 @@ def cellpose_segmentation(
         full_res_pxl_sizes_zyx = dataset_info[0]["coordinateTransformations"][0]["scale"]
         actual_res_pxl_sizes_zyx = dataset_info[level]["coordinateTransformations"][0]["scale"]
 
-        img_size_y = data_zyx.shape[1]
-        img_size_x = data_zyx.shape[2]
         # calculate anisotropy
         anisotropy = actual_res_pxl_sizes_zyx[0]/actual_res_pxl_sizes_zyx[1]
+        # resample z to make it isotropic
+        us_factor = np.round(data_zyx.shape[0]*anisotropy)
+
+        data_zyx = resize(data_zyx, (us_factor, data_zyx.shape[1], data_zyx.shape[2]), order=1, preserve_range=True)
+
         # Select 2D/3D behavior and set some parameters
         do_3D = data_zyx.shape[0] > 1
 
@@ -252,8 +255,6 @@ def cellpose_segmentation(
         else:
             if not os.path.exists(pretrained_model):
                 raise ValueError(f"{pretrained_model=} does not exist.")
-
-
 
         if output_label_name is None:
             try:
@@ -300,11 +301,10 @@ def cellpose_segmentation(
                 dimension_separator="/",
             )
 
-
-            logger.info(
-                f"mask will have shape {data_zyx.shape} "
-                f"and chunks {data_zyx.chunks}"
-            )
+           # logger.info(
+           #     f"mask will have shape {data_zyx.shape} "
+           #     f"and chunks {data_zyx.chunks}"
+           # )
 
             # Initialize cellpose
             gpu = use_gpu()
@@ -312,7 +312,6 @@ def cellpose_segmentation(
                 model = models.CellposeModel(
                     gpu=gpu, pretrained_model=pretrained_model
                 )
-                print('made it')
             else:
                 model = models.CellposeModel(gpu=gpu, model_type=model_type)
 
@@ -323,14 +322,14 @@ def cellpose_segmentation(
             logger.info(f"level: {level}")
             logger.info(f"model_type: {model_type}")
             logger.info(f"pretrained_model: {pretrained_model}")
-            logger.info(f"anisotropy: {anisotropy}")
-            logger.info(f"Total well shape/chunks:")
-            logger.info(f"{data_zyx.shape}")
-            logger.info(f"{data_zyx.chunks}")
+            # logger.info(f"anisotropy: {anisotropy}")
+            # logger.info(f"Total well shape/chunks:")
+            # logger.info(f"{data_zyx.shape}")
+            # logger.info(f"{data_zyx.chunks}")
 
             # Execute illumination correction
             image_mask = segment_FOV(
-                data_zyx.compute(),
+                data_zyx, #data_zyx.compute(),
                 model=model,
                 do_3D=do_3D,
                 anisotropy=anisotropy,
@@ -343,8 +342,10 @@ def cellpose_segmentation(
             )
 
             # expand mask image to be at 0-th level resolution
-            image_mask_0 = resize(image_mask, image_data[0][ind_channel, :, :, :].shape, order=0, preserve_range=True)
-
+            image_mask = image_mask.astype(float)
+            shape0 = image_data[0][ind_channel, :, :, :].shape
+            image_mask_1 = resize(image_mask, (image_mask.shape[0], shape0[1], shape0[2]), order=0)
+            image_mask_0 = resize(image_mask_1, shape0, order=0, anti_aliasing=False, preserve_range=True)
             #plt.imshow(image_mask_0[5,:,:], cmap='hot', interpolation='nearest')
             #plt.show()
 
@@ -366,7 +367,7 @@ def cellpose_segmentation(
                 overwrite=False,
                 num_levels=num_levels,
                 coarsening_xy=coarsening_xy,
-                chunksize=data_zyx.chunksize,
+                chunksize=image_data[0][ind_channel, :, :, :].chunksize,
                 aggregation_function=np.max,
             )
 
@@ -377,14 +378,14 @@ def cellpose_segmentation(
     return {}
 
 if __name__ == "__main__":
-    zarr_directory = "/Users/nick/Dropbox (Cole Trapnell's Lab)/Nick/pecFin/HCR_Data/built_zarr_files_testing/"
+    zarr_directory = "/Users/nick/Dropbox (Cole Trapnell's Lab)/Nick/pecFin/HCR_Data/built_zarr_files_testing2/"
 
     # temporaily set parameters
     # zarrurl = "/Users/nick/Dropbox (Cole Trapnell's Lab)/Nick/pecFin/HCR_Data/built_zarr_files_testing/2022_12_15 HCR Hand2 Tbx5a Fgf10a_1.zarr"
     #output_path = "/Users/nick/Dropbox (Cole Trapnell's Lab)/Nick/pecFin/HCR_Data/segmented_zarr_files_testing/2022_12_15 HCR Hand2 Tbx5a Fgf10a_1.zarr"
     seg_channel_label = 'DAPI'
     level = 1
-    pretrained_model = "/Users/nick/Dropbox (Cole Trapnell's Lab)/Nick/pecFin/HCR_Data/built_tiff_files_testing/models/DAPI-PRO"
+    pretrained_model = "/Users/nick/Dropbox (Cole Trapnell's Lab)/Nick/pecFin/HCR_Data/tiff_training_slices_testing/models/DAPI-Pro-2"
     overwrite = True
     model_type = "nuclei"
     output_label_name = "DAPI"
