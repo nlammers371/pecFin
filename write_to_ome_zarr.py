@@ -6,7 +6,6 @@ import dask
 import shutil
 from skimage.transform import resize
 from pathlib import Path
-from pathlib import Path
 from typing import Any
 from ome_zarr.reader import Reader
 from typing import Dict
@@ -14,16 +13,13 @@ import time
 from typing import List
 from typing import Sequence
 import ome_zarr
-import pandas as pd
 import zarr
 from ome_zarr.io import parse_url
 from ome_zarr.writer import write_image
-from anndata.experimental import write_elem
 import skimage.io
 import fractal_tasks_core
-
 import glob2 as glob
-import re
+
 
 import logging
 
