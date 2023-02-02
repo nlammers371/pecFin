@@ -419,4 +419,4 @@ if __name__ == '__main__':
     write_directory = "/Users/nick/Dropbox (Cole Trapnell's Lab)/Nick/pecFin/HCR_Data"
 
     # call main function
-    write_to_ome_zarr(project_directory, write_directory, overwrite=False, test_flag=test_flag, write_tiff=make_tiffs)
+    write_to_ome_zarr(project_directory, write_directory, overwrite=True, test_flag=test_flag, write_tiff=make_tiffs)

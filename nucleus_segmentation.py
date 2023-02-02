@@ -15,8 +15,7 @@ Copyright 2022 (C)
 
 Image segmentation via Cellpose library
 """
-import matplotlib.pyplot as plt
-import json
+
 import shutil
 import logging
 import glob2 as glob
@@ -25,38 +24,17 @@ import time
 from ome_zarr.io import parse_url
 from skimage.transform import resize
 from ome_zarr.reader import Reader
-from ome_zarr.writer import write_image
-from pathlib import Path
 from typing import Any
 from typing import Dict
 from typing import Literal
 from typing import Optional
-from typing import Sequence
-from skimage.measure import label
-import anndata as ad
 import dask.array as da
 import numpy as np
-import pandas as pd
 import zarr
-from anndata.experimental import write_elem
 from cellpose import models
 from cellpose.core import use_gpu
-
 import fractal_tasks_core
-from fractal_tasks_core.lib_channels import ChannelNotFoundError
-from fractal_tasks_core.lib_channels import get_channel_from_image_zarr
 from fractal_tasks_core.lib_pyramid_creation import build_pyramid
-from fractal_tasks_core.lib_regions_of_interest import (
-    array_to_bounding_box_table,
-)
-from fractal_tasks_core.lib_regions_of_interest import (
-    convert_ROI_table_to_indices,
-)
-from fractal_tasks_core.lib_remove_FOV_overlaps import (
-    get_overlapping_pairs_3D,
-)
-from fractal_tasks_core.lib_zattrs_utils import extract_zyx_pixel_sizes
-from fractal_tasks_core.lib_zattrs_utils import rescale_datasets
 
 logger = logging.getLogger(__name__)
 
