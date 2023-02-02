@@ -133,6 +133,7 @@ def cellpose_segmentation(
     output_label_name: Optional[str] = None,
     model_type: Literal["nuclei", "cyto", "cyto2"] = "nuclei",
     pretrained_model: Optional[str] = None,
+    overwrite: Optional[bool] = False
 ) -> Dict[str, Any]:
     """
     Run cellpose segmentation on the ROIs of a single OME-NGFF image
