@@ -174,7 +174,7 @@ def cellpose_segmentation(
     # get list of images
     image_list = sorted(glob.glob(zarr_directory + "*.zarr"))
 
-    for im in [0]:#range(len(image_list)):
+    for im in range(len(image_list)):
         zarrurl = image_list[im]
         # read the image data
         store = parse_url(zarrurl, mode="r").store
@@ -323,8 +323,8 @@ def cellpose_segmentation(
             # expand mask image to be at 0-th level resolution
             image_mask = image_mask.astype(float)
             shape0 = image_data[0][ind_channel, :, :, :].shape
-            image_mask_1 = resize(image_mask, (image_mask.shape[0], shape0[1], shape0[2]), order=0)
-            image_mask_0 = resize(image_mask_1, shape0, order=0, anti_aliasing=False, preserve_range=True)
+            #image_mask_1 = resize(image_mask, (image_mask.shape[0], shape0[1], shape0[2]), order=0)
+            image_mask_0 = resize(image_mask, shape0, order=0, anti_aliasing=False, preserve_range=True)
             #plt.imshow(image_mask_0[5,:,:], cmap='hot', interpolation='nearest')
             #plt.show()
 
@@ -357,7 +357,7 @@ def cellpose_segmentation(
     return {}
 
 if __name__ == "__main__":
-    zarr_directory = "/Users/nick/Dropbox (Cole Trapnell's Lab)/Nick/pecFin/HCR_Data/built_zarr_files_testing2/"
+    zarr_directory = "/Users/nick/Dropbox (Cole Trapnell's Lab)/Nick/pecFin/HCR_Data/built_zarr_files_small/"
 
     # temporaily set parameters
     # zarrurl = "/Users/nick/Dropbox (Cole Trapnell's Lab)/Nick/pecFin/HCR_Data/built_zarr_files_testing/2022_12_15 HCR Hand2 Tbx5a Fgf10a_1.zarr"

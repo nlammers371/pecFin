@@ -19,8 +19,6 @@ from ome_zarr.writer import write_image
 import skimage.io
 import fractal_tasks_core
 import glob2 as glob
-
-
 import logging
 
 __OME_NGFF_VERSION__ = fractal_tasks_core.__OME_NGFF_VERSION__
@@ -224,7 +222,7 @@ def write_to_ome_zarr(project_directory, write_directory, write_tiff=False, test
 
             # Define image zarr
             if test_flag:
-                outDir = write_directory + '/built_zarr_files_testing2/'
+                outDir = write_directory + '/built_zarr_files_small/'
             else:
                 outDir = write_directory + '/built_zarr_files/'
             zarrurl = f"{outDir + image_name}.zarr"
@@ -250,7 +248,7 @@ def write_to_ome_zarr(project_directory, write_directory, write_tiff=False, test
             # extract "top level" dimensions for pixel size calculations
             dask_data = dask.array.squeeze(imObject.dask_data)
             if test_flag:
-                dask_data = dask_data[:, 60:120, 900:1412, 900:1412]
+                dask_data = dask_data[:, 30:150, 700:1600, 700:1600]
             if not skip_flag:
                 if os.path.isdir(zarrurl):
                    shutil.rmtree(zarrurl)
@@ -344,8 +342,8 @@ def write_to_ome_zarr(project_directory, write_directory, write_tiff=False, test
             # write tiff if desired
             if write_tiff:
                 if test_flag:
-                    tiffDir = write_directory + '/built_tiff_files_testing2/'
-                    trainDir = write_directory + '/tiff_training_slices_testing2/'
+                    tiffDir = write_directory + '/built_tiff_files_small/'
+                    trainDir = write_directory + '/tiff_training_slices_small/'
                 else:
                     tiffDir = write_directory + '/built_tiff_files/'
                     trainDir = write_directory + '/tiff_training_slices/'
@@ -404,13 +402,7 @@ def write_to_ome_zarr(project_directory, write_directory, write_tiff=False, test
 
 if __name__ == '__main__':
 
-    # def write_to_ome_zarr(project_directory, overwrite=False, match_string='*')
-    overwrite = False
-    match_string = '*'
-
     # set parameters
-    num_levels = 5
-    coarsening_factor = 2
     test_flag = True
     make_tiffs = True
     # set paths to raw data
@@ -419,4 +411,4 @@ if __name__ == '__main__':
     write_directory = "/Users/nick/Dropbox (Cole Trapnell's Lab)/Nick/pecFin/HCR_Data"
 
     # call main function
-    write_to_ome_zarr(project_directory, write_directory, overwrite=True, test_flag=test_flag, write_tiff=make_tiffs)
+    write_to_ome_zarr(project_directory, write_directory, overwrite=True, test_flag=test_flag, write_tiff=make_tiffs, match_string='*')

@@ -2,11 +2,13 @@ from ome_zarr.io import parse_url
 from ome_zarr.reader import Reader
 import napari
 import numpy as np
+from napari_animation import Animation
+from skimage.measure import label, regionprops, regionprops_table
 
 # set parameters
 filename = "2022_12_15 HCR Hand2 Tbx5a Fgf10a_1.zarr"
-readPath = "/Users/nick/Dropbox (Cole Trapnell's Lab)/Nick/pecFin/HCR_Data/built_zarr_files_testing2/" + filename
-readPathLabels = "/Users/nick/Dropbox (Cole Trapnell's Lab)/Nick/pecFin/HCR_Data/built_zarr_files_testing2/" + filename + "labels"
+readPath = "/Users/nick/Dropbox (Cole Trapnell's Lab)/Nick/pecFin/HCR_Data/built_zarr_files_small/" + filename
+readPathLabels = "/Users/nick/Dropbox (Cole Trapnell's Lab)/Nick/pecFin/HCR_Data/built_zarr_files_small/" + filename + "labels"
 level = 1
 
 #############
@@ -59,5 +61,15 @@ colormaps = [channel_metadata[i]["color"] for i in range(len(channel_metadata))]
 viewer = napari.view_image(image_data[level], channel_axis=0, name=channel_names, colormap=colormaps, contrast_limits=[0, res_upper], scale=scale_vec)
 labels_layer = viewer.add_labels(label_data[level], name='segmentation', scale=scale_vec)
 
+# add layer of mask centroids
+label_array = np.asarray(label_data[level].compute())
+regions = regionprops(label_array)
+
+centroid_array = np.empty((len(regions), 3))
+for rgi, rg in enumerate(regions):
+    centroid_array[rgi, :] = rg.centroid
+
+points = np.array([[100, 100, 100], [50, 200, 200], [10, 300, 100]])
+points_layer = viewer.add_points(centroid_array, size=3, name='Centroids', scale=scale_vec)
 if __name__ == '__main__':
     napari.run()
