@@ -46,7 +46,7 @@ def ellipsoid_axis_lengths(central_moments):
     return tuple([math.sqrt(20.0 * e) for e in eigvals])
 
 def segment_pec_fins(dataRoot, labelRoot, level):
-    filename = "2022_12_15 HCR Hand2 Tbx5a Fgf10a_1"
+    filename = "2022_12_22 HCR Sox9a Tbx5a Emilin3a_1"
 
     dataPath = dataRoot + filename + ".zarr"
     labelPath = labelRoot + filename + ".zarrlabels"

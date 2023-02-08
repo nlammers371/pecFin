@@ -98,6 +98,7 @@ def segment_FOV(
             channels=[0, 0],
             do_3D=do_3D,
             min_size=min_size,
+            anisotropy=anisotropy,
             net_avg=False,
             augment=False
         )
@@ -165,6 +166,7 @@ def cellpose_segmentation(
     # Read useful parameters from metadata
     coarsening_xy = 2 #NL: need to store this in metadata
     min_size = (diameter_level0/coarsening_xy)**2
+
     # Preliminary check
     if seg_channel_label is None:
         raise ValueError(
@@ -220,9 +222,9 @@ def cellpose_segmentation(
         # calculate anisotropy
         anisotropy = actual_res_pxl_sizes_zyx[0]/actual_res_pxl_sizes_zyx[1]
         # resample z to make it isotropic
-        us_factor = np.round(data_zyx.shape[0]*anisotropy)
+        #us_factor = np.round(data_zyx.shape[0]*anisotropy)
 
-        data_zyx = resize(data_zyx, (us_factor, data_zyx.shape[1], data_zyx.shape[2]), order=1, preserve_range=True)
+        #data_zyx = resize(data_zyx, (us_factor, data_zyx.shape[1], data_zyx.shape[2]), order=1, preserve_range=True)
 
         # Select 2D/3D behavior and set some parameters
         do_3D = data_zyx.shape[0] > 1
@@ -324,12 +326,12 @@ def cellpose_segmentation(
             image_mask = image_mask.astype(float)
             shape0 = image_data[0][ind_channel, :, :, :].shape
             #image_mask_1 = resize(image_mask, (image_mask.shape[0], shape0[1], shape0[2]), order=0)
-            image_mask_0 = resize(image_mask, shape0, order=0, anti_aliasing=False, preserve_range=True)
+            #image_mask_0 = resize(image_mask, shape0, order=0, anti_aliasing=False, preserve_range=True)
             #plt.imshow(image_mask_0[5,:,:], cmap='hot', interpolation='nearest')
             #plt.show()
 
             # Compute and store 0-th level to disk
-            da.array(image_mask_0).to_zarr(
+            da.array(image_mask).to_zarr(
                 url=mask_zarr,
                 compute=True,
             )
