@@ -17,8 +17,7 @@ import pickle
 import os.path
 import os
 import math
-import sys
-from contextlib import suppress
+
 
 def ellipsoid_axis_lengths(central_moments):
     """Compute ellipsoid major, intermediate and minor axis length.

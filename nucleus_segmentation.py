@@ -372,44 +372,10 @@ if __name__ == "__main__":
     output_label_name = "DAPI"
     test_flag = True
 
-    diameter_level0 = 80
-    cellprob_threshold = -0.5
-    flow_threshold = 0.6  # NL: I don't think this is factored in for 3D
-    min_size = diameter_level0 ** 3
+    #diameter_level0 = 80
+    #cellprob_threshold = -0.5
+    #flow_threshold = 0.6  # NL: I don't think this is factored in for 3D
+    #min_size = diameter_level0 ** 3
 
     cellpose_segmentation(zarr_directory=zarr_directory, level=level, seg_channel_label=seg_channel_label,
-                          output_label_name=output_label_name, pretrained_model=pretrained_model)
-
-
-    """
-    from pydantic import BaseModel
-    from fractal_tasks_core._utils import run_fractal_task
-
-    class TaskArguments(BaseModel):
-        # Fractal arguments
-        input_paths: Sequence[Path]
-        output_path: Path
-        component: str
-        metadata: Dict[str, Any]
-        # Task-specific arguments
-        seg_channel_label: Optional[str] = None
-        wavelength_id: Optional[str] = None
-        level: int
-        relabeling: bool = True
-        anisotropy: Optional[float] = None
-        diameter_level0: float = 80.0
-        cellprob_threshold: float = 0.0
-        flow_threshold: float = 0.4
-        ROI_table_name: str = "FOV_ROI_table"
-        bounding_box_ROI_table_name: Optional[str] = None
-        output_label_name: Optional[str] = None
-        model_type: Literal["nuclei", "cyto", "cyto2"] = "nuclei"
-        pretrained_model: Optional[str] = None
-
-    run_fractal_task(
-        task_function=cellpose_segmentation,
-        TaskArgsModel=TaskArguments,
-        logger_name=logger.name,
-    )
-
-"""
+                          output_label_name=output_label_name, pretrained_model=pretrained_model, overwrite=overwrite)
