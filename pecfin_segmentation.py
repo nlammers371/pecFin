@@ -12,66 +12,149 @@ import json
 from skimage.measure import label, regionprops, regionprops_table
 import itertools
 from scipy.spatial import distance_matrix
-#external_stylesheets = ['https://codepen.io/chriddyp/pen/bWLwgP.css']
+from sklearn.neighbors import KDTree
+import pickle
+import os.path
+import os
+import math
+import sys
+from contextlib import suppress
 
+def ellipsoid_axis_lengths(central_moments):
+    """Compute ellipsoid major, intermediate and minor axis length.
 
-def segment_pec_fins(dataPath, labelPath, level):
-    fileName = "2022_12_15 HCR Hand2 Tbx5a Fgf10a_1.zarr"
+    Parameters
+    ----------
+    central_moments : ndarray
+        Array of central moments as given by ``moments_central`` with order 2.
 
-    def load_image_data(dataPath, labelPath, level):
+    Returns
+    -------
+    axis_lengths: tuple of float
+        The ellipsoid axis lengths in descending order.
+    """
+    m0 = central_moments[0, 0, 0]
+    sxx = central_moments[2, 0, 0] / m0
+    syy = central_moments[0, 2, 0] / m0
+    szz = central_moments[0, 0, 2] / m0
+    sxy = central_moments[1, 1, 0] / m0
+    sxz = central_moments[1, 0, 1] / m0
+    syz = central_moments[0, 1, 1] / m0
+    S = np.asarray([[sxx, sxy, sxz], [sxy, syy, syz], [sxz, syz, szz]])
+    # determine eigenvalues in descending order
+    eigvals = np.sort(np.linalg.eigvalsh(S))[::-1]
+    return tuple([math.sqrt(20.0 * e) for e in eigvals])
+
+def segment_pec_fins(dataRoot, labelRoot, level):
+    filename = "2022_12_15 HCR Hand2 Tbx5a Fgf10a_1"
+
+    dataPath = dataRoot + filename + ".zarr"
+    labelPath = labelRoot + filename + ".zarrlabels"
+    global propPath, curationPath
+
+    propPath = dataRoot + filename + '_nucleus_props.csv'
+    curationPath = dataRoot + filename + '_curation_info/'
+
+    if not os.path.isdir(curationPath):
+        os.mkdir(curationPath)
+
+    def load_image_data(dataPath, labelPath, level, nn_k=1):
 
         #############
         # Main image
         #############
+        # check for pre-existing region[props file
+        global selected_points_prev, vl_prev
 
-        # read the image data
-        #store = parse_url(dataPath, mode="r").store
-        reader = Reader(parse_url(dataPath))
+        selected_points_prev = []
+        vl_prev = []
 
-        # nodes may include images, labels etc
-        nodes = list(reader())
+        if os.path.isfile(propPath):
+            df = pd.read_csv(propPath)
 
-        # first node will be the image pixel data
-        image_node = nodes[0]
-        image_data = image_node.data
+            # load key info from previous session
+            sc_path = curationPath + 'selected_points.pkl'
+            with open(sc_path, 'rb') as fn:
+                selected_points_prev = pickle.load(fn)
+            selected_points_prev = json.loads(selected_points_prev)
 
-        #############
-        # Labels
-        #############
+            vl_path = curationPath + 'value_slider.pkl'
+            with open(vl_path, 'rb') as fn:
+                vl_prev = pickle.load(fn)
+            #vl_prev = json.loads(vl_prev)
+            # print('inside load')
+            # print(selected_points_prev)
+        else:
+            # read the image data
+            #store = parse_url(dataPath, mode="r").store
+            #with contextlib.suppress(Exception):
+            reader = Reader(parse_url(dataPath))
 
-        # read the image data
-        store_lb = parse_url(labelPath, mode="r").store
-        reader_lb = Reader(parse_url(labelPath))
 
-        # nodes may include images, labels etc
-        nodes_lb = list(reader_lb())
+            # nodes may include images, labels etc
+            nodes = list(reader())
 
-        # first node will be the image pixel data
-        label_node = nodes_lb[1]
-        label_data = label_node.data
+            # first node will be the image pixel data
+            image_node = nodes[0]
+            image_data = image_node.data
 
-        # extract key image attributes
-        #omero_attrs = image_node.root.zarr.root_attrs['omero']
-        #channel_metadata = omero_attrs['channels']  # list of channels and relevant info
-        multiscale_attrs = image_node.root.zarr.root_attrs['multiscales']
-        #axis_names = multiscale_attrs[0]['axes']
-        #dataset_info = multiscale_attrs[0]['datasets']  # list containing scale factors for each axis
+            #############
+            # Labels
+            #############
 
-        # extract useful info
-        scale_vec = multiscale_attrs[0]["datasets"][level]["coordinateTransformations"][0]["scale"]
+            # read the image data
+            #store_lb = parse_url(labelPath, mode="r").store
+            reader_lb = Reader(parse_url(labelPath))
 
-        # add layer of mask centroids
-        label_array = np.asarray(label_data[level].compute())
-        regions = regionprops(label_array)
+            # nodes may include images, labels etc
+            nodes_lb = list(reader_lb())
 
-        centroid_array = np.empty((len(regions), 3))
-        for rgi, rg in enumerate(regions):
-            centroid_array[rgi, :] = rg.centroid
+            # first node will be the image pixel data
+            label_node = nodes_lb[1]
+            label_data = label_node.data
 
-        centroid_array = np.multiply(centroid_array, scale_vec)
-        df = pd.DataFrame(centroid_array, columns=['z_val','y_val','x_val'])
+            # extract key image attributes
+            #omero_attrs = image_node.root.zarr.root_attrs['omero']
+            #channel_metadata = omero_attrs['channels']  # list of channels and relevant info
+            multiscale_attrs = image_node.root.zarr.root_attrs['multiscales']
 
-        return df
+            # extract useful info
+            scale_vec = multiscale_attrs[0]["datasets"][level]["coordinateTransformations"][0]["scale"]
+
+            # add layer of mask centroids
+            label_array = np.asarray(label_data[level].compute())
+            regions = regionprops(label_array)
+
+            centroid_array = np.empty((len(regions), 3))
+            for rgi, rg in enumerate(regions):
+                centroid_array[rgi, :] = np.multiply(rg.centroid, scale_vec)
+            
+            # convert centroid array to data frame
+            df1 = pd.DataFrame(centroid_array, columns=["Z", "Y", "X"])
+
+            # add additional info
+            area_vec = []
+            for rgi, rg in enumerate(regions):
+                area_vec.append(rg.area)
+            df1.assign(Area=np.asarray(area_vec))
+
+            # calculate axis lengths
+            axis_array = np.empty((len(regions), 3))
+            for rgi, rg in enumerate(regions):
+                axes = ellipsoid_axis_lengths(rg['moments_central'])
+                axis_array[rgi, :] = np.multiply(axes, scale_vec)
+
+            df2 = pd.DataFrame(axis_array, columns=["Axis_1", "Axis_2", "Axis_3"])
+
+            df = pd.concat([df1, df2], axis=1)
+
+        # calculate NN statistics
+        tree = KDTree(df.iloc[:, 0:2], leaf_size=2)
+        nearest_dist, nearest_ind = tree.query(df.iloc[:, 0:2], k=8)
+        mean_nn_dist_vec = np.mean(nearest_dist[:, 1:], axis=0)
+        nn_threshold = mean_nn_dist_vec[nn_k-1]
+        
+        return df, nn_threshold
 
     def polyval2d(x, y, m):
         order = int(np.sqrt(len(m))) - 1
@@ -89,16 +172,25 @@ def segment_pec_fins(dataPath, labelPath, level):
             G[:, k] = x ** i * y ** j
         m, _, _, _ = np.linalg.lstsq(G, z)
         return m
+    
     # get data frame
-    df = load_image_data(dataPath, labelPath, level)
+    global nn_threshold, df
+    df, nn_threshold = load_image_data(dataPath, labelPath, level)
+
     # define mesh grid for curve fitting
     nx = 100
     ny = 100
 
-    global xx, yy, xm
-    xm = np.max(df["x_val"])
+    global xx, yy
+    xm = np.max(df["X"])
     xx, yy = np.meshgrid(np.linspace(0, xm, nx),
-                         np.linspace(0, np.max(df["y_val"]), ny))
+                         np.linspace(0, np.max(df["Y"]), ny))
+
+    global val_defaults
+    if len(vl_prev) == 2:
+        val_defaults = vl_prev
+    else:
+        val_defaults = [-round(5*nn_threshold), round(nn_threshold)]
 
     ########################
     # App
@@ -109,10 +201,12 @@ def segment_pec_fins(dataPath, labelPath, level):
     #})
 
 
-    def create_figure(skip_points=[]):
-        dfs = df.drop(skip_points)
-        return px.scatter_3d(dfs, x='x_val', y='y_val', z='z_val', opacity=0.5)
-    f= create_figure()
+    def create_figure():
+        fig = px.scatter_3d(df, x="X", y="Y", z="Z", opacity=0.5)
+        fig.update_traces(marker=dict(size=6))
+        return fig
+    f = create_figure()
+
 
     app.layout = html.Div([#html.Button('Delete', id='delete'),
                         html.Button('Clear Selection', id='clear'),
@@ -120,9 +214,10 @@ def segment_pec_fins(dataPath, labelPath, level):
                         html.Button('Calculate Fit', id='calc-button'),
                         html.P(id='save-button-hidden', style={'display': 'none'}),
                         dcc.Graph(id='3d_scat', figure=f),
-                        html.Div('selected:'),
-                        html.Div(id='selected_points'),
-                        dcc.RangeSlider(-round(0.25*xm), round(0.25*xm), id='select-slider'),
+                        #html.Div('selected:'),
+                        html.Div(id='selected_points', hidden=True),
+                        html.Div(id='pfin_nuclei', hidden=True),
+                        dcc.RangeSlider(-round(10*nn_threshold), round(10*nn_threshold), value=val_defaults, id='select-slider'),
                         html.Div(id='output-container-range-slider')
     ])
 
@@ -132,25 +227,33 @@ def segment_pec_fins(dataPath, labelPath, level):
                     Input('clear', 'n_clicks')],
                     [State('selected_points', 'children')])
 
-    def select_point(clickData,  n_clicks, selected_points):
+    def select_point(clickData, n_clicks, selected_points):
         ctx = dash.callback_context
         ids = [c['prop_id'] for c in ctx.triggered]
+        changed_id = [p['prop_id'] for p in dash.callback_context.triggered][0]
 
         if selected_points:
             results = json.loads(selected_points)
         else:
             results = []
 
+        # print('inside sselect points')
+        # print(selected_points_prev)
+        if len(selected_points_prev) > 0:
+            for p in selected_points_prev:
+                if p not in results:
+                    results.append(p)
 
         if '3d_scat.clickData' in ids:
-            if clickData:
+            if True:#clickData:
                 for p in clickData['points']:
                     if p not in results:
                         results.append(p)
-
-        if n_clicks!=None:
-            if n_clicks > 0:
-                results = []
+                    else:
+                        # if selected point is in list, then lets unselect
+                        results.remove(p)
+        if 'clear' in changed_id:
+           results = []
 
         results = json.dumps(results)
         #coordinates = [[p['x']] for p in results]
@@ -164,7 +267,8 @@ def segment_pec_fins(dataPath, labelPath, level):
         value = json.dumps(value)
         return value
 
-    @app.callback(Output('3d_scat', 'figure'),
+    @app.callback([Output('3d_scat', 'figure'),
+                   Output('pfin_nuclei', 'children')],
                 [Input('selected_points', 'children'),
                  Input('output-container-range-slider', 'children'),
                  Input('calc-button', 'n_clicks'),
@@ -172,12 +276,11 @@ def segment_pec_fins(dataPath, labelPath, level):
 
     def chart_3d(selected_points, select_range, n_clicks, slider_range):
         global f
-
         # check to see which values have changed
         changed_id = [p['prop_id'] for p in dash.callback_context.triggered][0]
 
         f = create_figure()
-
+        f.update_layout(uirevision="Don't change")
         selected_points = json.loads(selected_points) if selected_points else []
         if selected_points:
             f.add_trace(
@@ -187,22 +290,18 @@ def segment_pec_fins(dataPath, labelPath, level):
                     y=[p['y'] for p in selected_points],
                     z=[p['z'] for p in selected_points],
                     marker=dict(
-                        color='red',
-                        size=5,
+                        color='crimson',
+                        size=7,
                         line=dict(
-                            color='red',
-                            width=2
+                            color='black',
+                            width=4
                         )
                     ),
                     showlegend=False
                 )
             )
 
-        # check if calc button has been clicked
-        # clear_fit = False
-        # if n_clicks_fit != None:
-        #     if n_clicks_fit > 0:
-        #         clear_fit = True
+        pec_fin_nuclei = []
         if selected_points and (('select-slider' in changed_id) | ('calc-button' in changed_id)):
 
             #oint_dict = json.loads(selected_points)
@@ -212,17 +311,17 @@ def segment_pec_fins(dataPath, labelPath, level):
             # Evaluate it on a grid...
             zz = polyval2d(xx, yy, m, )
             # add to figure
-            f.add_trace(go.Surface(z=zz, x=xx, y=yy, colorscale='algae', opacity=0.5))
+            f.add_trace(go.Surface(z=zz, x=xx, y=yy, colorscale='deep', opacity=0.75, showscale=False))
 
             # now calculate points within the desired range of the surface
             surf_array = np.concatenate((np.reshape(zz, (zz.size, 1)), np.reshape(yy, (yy.size, 1)), np.reshape(xx, (xx.size, 1))), axis=1)
-            dist_array = distance_matrix(df[['z_val', 'y_val', 'x_val']], surf_array)
+            dist_array = distance_matrix(df[["Z", "Y", "X"]], surf_array)
             min_distance = np.min(dist_array, axis=1)
             # use cross product ot determine whether point is "above" or "below" surface
             min_ids = np.argmin(dist_array, axis=1)
             abv_list = []
             for i in range(len(min_ids)):
-                zyx = df[['z_val', 'y_val', 'x_val']].iloc[i]
+                zyx = df[["Z", "Y", "X"]].iloc[i]
                 surf_zyx1 = surf_array[min_ids[i]]
 
                 is_above = zyx[0] >= surf_zyx1[0]
@@ -234,61 +333,51 @@ def segment_pec_fins(dataPath, labelPath, level):
             # highlight points
             min_distance = np.multiply(min_distance, abv_list)
             select_values = np.fromstring(select_range[1:-1], sep=',')
-            idx_candidates = np.where((min_distance <= select_values[1]) & (min_distance >= select_values[0]))[0]
+            pec_fin_nuclei = np.where((min_distance <= select_values[1]) & (min_distance >= select_values[0]))[0]
 
-            if idx_candidates.any():
+            if pec_fin_nuclei.any():
                 f.add_trace(
                     go.Scatter3d(
                         mode='markers',
-                        x=[df['x_val'].iloc[p] for p in idx_candidates],
-                        y=[df['y_val'].iloc[p] for p in idx_candidates],
-                        z=[df['z_val'].iloc[p] for p in idx_candidates],
+                        x=[df["X"].iloc[p] for p in pec_fin_nuclei],
+                        y=[df["Y"].iloc[p] for p in pec_fin_nuclei],
+                        z=[df["Z"].iloc[p] for p in pec_fin_nuclei],
                         marker=dict(
-                            color='red',
-                            size=5,
-                            line=dict(
-                                color='red',
-                                width=2
-                            )
-                        ),
+                            color='salmon',
+                            size=5),
                         showlegend=False
                     )
                 )
-        return f
-
-    # @app.callback(
-    #     Output('3d_scat', 'figure'),
-    #     [Input('3d_scat', 'figure'),
-    #     Input('calc-button', [p['z']'n_clicks'),
-    #     Input('selected_points', 'children')])
-    # def clicks(n_clicks, selected_points, f):
-    #     if n_clicks != None:
-    #         print(n_clicks)
-    #         if n_clicks > 0:
-    #             point_dict = json.loads(selected_points)
-    #             coordinates = np.reshape([[p['z'], p['y'], p['x']] for p in point_dict],(len(point_dict), 3))
-    #
-    #             xyz = np.roll(coordinates, 2, axis=1)
-    #
-    #             # Fit a 3rd order, 2d polynomial
-    #             m = polyfit2d(xyz[:, 0], xyz[:, 1], xyz[:, 2], order=2)
-    #             # Evaluate it on a grid...
-    #             nx, ny = 100, 100
-    #             xx, yy = np.meshgrid(np.linspace(xyz[:, 0].min(), xyz[:, 0].max(), nx), np.linspace(xyz[:, 1].min(), xyz[:, 1].max(), ny))
-    #             zz = polyval2d(xx, yy, m)
-    #             print(zz)
-
+        return f, pec_fin_nuclei
 
     @app.callback(
         Output('save-button-hidden', 'children'),
         [Input('save-button', 'n_clicks'),
-        Input('selected_points', 'children')])
-    def clicks(n_clicks, selected_points):
-        if n_clicks != None:
-            if n_clicks > 0:
-                point_dict = json.loads(selected_points)
-                coordinates = pd.DataFrame(np.reshape([[p['z'], p['y'], p['x']] for p in point_dict],(len(point_dict), 3)), columns=["Z", "Y", "X"])
-                coordinates.to_csv('/Users/nick/test.csv', index=False, encoding='utf-8')
+            Input('pfin_nuclei', 'children'),
+            Input('selected_points', 'children'),
+            Input('select-slider', 'value')])
+
+    def clicks(n_clicks, pec_fin_nuclei, selected_points,slider_values):
+        changed_id = [p['prop_id'] for p in dash.callback_context.triggered][0]
+        if 'save-button' in changed_id:
+            lbl_vec = []
+            for rg in range(df.shape[0]):
+                if rg in pec_fin_nuclei:
+                    lbl_vec.append(True)
+                else:
+                    lbl_vec.append(False)
+            df.assign(PecFinFlag=np.asarray(lbl_vec))
+            # save
+            write_file = dataRoot + filename + '_nucleus_props.csv'
+            df.to_csv(write_file)
+
+            write_file2 = dataRoot + filename + '_curation_info/selected_points.pkl'
+            with open(write_file2, 'wb') as wf:
+                pickle.dump(selected_points, wf)
+
+            write_file3 = dataRoot + filename + '_curation_info/value_slider.pkl'
+            with open(write_file3, 'wb') as wf:
+                pickle.dump(slider_values, wf)
 
     app.run_server(debug=True)
 
@@ -296,14 +385,12 @@ if __name__ == '__main__':
 
     # set parameters
     filename = "2022_12_15 HCR Hand2 Tbx5a Fgf10a_1.zarr"
-    dataPath = "/Users/nick/Dropbox (Cole Trapnell's Lab)/Nick/pecFin/HCR_Data/built_zarr_files_small/" + filename
-    labelPath = "/Users/nick/Dropbox (Cole Trapnell's Lab)/Nick/pecFin/HCR_Data/built_zarr_files_small/" + filename + "labels"
+    dataRoot = "/Users/nick/Dropbox (Cole Trapnell's Lab)/Nick/pecFin/HCR_Data/built_zarr_files_small/"
+    labelRoot = "/Users/nick/Dropbox (Cole Trapnell's Lab)/Nick/pecFin/HCR_Data/built_zarr_files_small/"
     level = 1
 
     # load image data
-    nucleus_centroids = segment_pec_fins(dataPath, labelPath, level)
+    segment_pec_fins(dataRoot, labelRoot, level)
 
-
-
-    nucleus_coordinates = pd.read_csv('/Users/nick/test.csv')
-    print(nucleus_coordinates)
+    #nucleus_coordinates = pd.read_csv('/Users/nick/test.csv')
+    #print(nucleus_coordinates)
