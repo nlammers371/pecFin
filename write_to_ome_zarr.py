@@ -155,11 +155,9 @@ def write_to_ome_zarr(project_directory, write_directory, write_tiff=False, test
 
         # get list of valid image files within directory
         image_read_dir = project_directory + folder_name + '/'
-        image_list = sorted(glob.glob(image_read_dir + folder_name + "_?.czi"))
+        image_list = sorted(glob.glob(image_read_dir + folder_name + "_*.czi"))
 
         ######################
-
-
 
         # initialize scaling method that reflects above options
         scaler_method = ome_zarr.scale.Scaler(downscale=coarsening_factor, max_layer=num_levels-1)

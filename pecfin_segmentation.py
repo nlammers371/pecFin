@@ -19,42 +19,14 @@ import os
 import math
 
 
-def ellipsoid_axis_lengths(central_moments):
-    """Compute ellipsoid major, intermediate and minor axis length.
 
-    Parameters
-    ----------
-    central_moments : ndarray
-        Array of central moments as given by ``moments_central`` with order 2.
 
-    Returns
-    -------
-    axis_lengths: tuple of float
-        The ellipsoid axis lengths in descending order.
-    """
-    m0 = central_moments[0, 0, 0]
-    sxx = central_moments[2, 0, 0] / m0
-    syy = central_moments[0, 2, 0] / m0
-    szz = central_moments[0, 0, 2] / m0
-    sxy = central_moments[1, 1, 0] / m0
-    sxz = central_moments[1, 0, 1] / m0
-    syz = central_moments[0, 1, 1] / m0
-    S = np.asarray([[sxx, sxy, sxz], [sxy, syy, syz], [sxz, syz, szz]])
-    # determine eigenvalues in descending order
-    eigvals, eigvecs = np.linalg.eig(S)
-    si = np.argsort(eigvals)
-    si = si[::-1]
-    eigvals = eigvals[si]
-    eigvecs[:, si] = eigvecs[:, si]
+def segment_pec_fins(dataRoot, nn_k=10):
 
-    return tuple([math.sqrt(20.0 * e) for e in eigvals]), eigvecs
+    filename = "2022_12_15 HCR Hand2 Tbx5a Fgf10a_1"
 
-def segment_pec_fins(dataRoot, labelRoot, level):
-    filename = "2022_12_22 HCR Sox9a Tbx5a Emilin3a_1"
-
-    dataPath = dataRoot + filename + ".zarr"
-    labelPath = labelRoot + filename + ".zarrlabels"
     global propPath, curationPath
+    global nn_threshold, df
 
     propPath = dataRoot + filename + '_nucleus_props.csv'
     curationPath = dataRoot + filename + '_curation_info/'
@@ -62,22 +34,21 @@ def segment_pec_fins(dataRoot, labelRoot, level):
     if not os.path.isdir(curationPath):
         os.mkdir(curationPath)
 
-    def load_image_data(dataPath, labelPath, level, nn_k=1):
+    if os.path.isfile(propPath):
+        df = pd.read_csv(propPath)
+    else:
+        raise Exception("Selected dataset has no nucleus data. Have you run extract_nucleus_stats?")
 
-        #############
-        # Main image
-        #############
-        # check for pre-existing region[props file
-        global selected_points_prev, vl_prev
+    # look for saved data from previous curation effort
+    selected_points_prev = []
+    vl_prev = []
 
-        selected_points_prev = []
-        vl_prev = []
+    if os.path.isfile(propPath):
+        df = pd.read_csv(propPath)
 
-        if os.path.isfile(propPath):
-            df = pd.read_csv(propPath)
-
-            # load key info from previous session
-            sc_path = curationPath + 'selected_points.pkl'
+        # load key info from previous session
+        sc_path = curationPath + 'selected_points.pkl'
+        if os.path.isfile(sc_path):
             with open(sc_path, 'rb') as fn:
                 selected_points_prev = pickle.load(fn)
             selected_points_prev = json.loads(selected_points_prev)
@@ -85,80 +56,12 @@ def segment_pec_fins(dataRoot, labelRoot, level):
             vl_path = curationPath + 'value_slider.pkl'
             with open(vl_path, 'rb') as fn:
                 vl_prev = pickle.load(fn)
-            #vl_prev = json.loads(vl_prev)
-            # print('inside load')
-            # print(selected_points_prev)
-        else:
-            # read the image data
-            #store = parse_url(dataPath, mode="r").store
-            #with contextlib.suppress(Exception):
-            reader = Reader(parse_url(dataPath))
 
-
-            # nodes may include images, labels etc
-            nodes = list(reader())
-
-            # first node will be the image pixel data
-            image_node = nodes[0]
-            image_data = image_node.data
-
-            #############
-            # Labels
-            #############
-
-            # read the image data
-            #store_lb = parse_url(labelPath, mode="r").store
-            reader_lb = Reader(parse_url(labelPath))
-
-            # nodes may include images, labels etc
-            nodes_lb = list(reader_lb())
-
-            # first node will be the image pixel data
-            label_node = nodes_lb[1]
-            label_data = label_node.data
-
-            # extract key image attributes
-            #omero_attrs = image_node.root.zarr.root_attrs['omero']
-            #channel_metadata = omero_attrs['channels']  # list of channels and relevant info
-            multiscale_attrs = image_node.root.zarr.root_attrs['multiscales']
-
-            # extract useful info
-            scale_vec = multiscale_attrs[0]["datasets"][level]["coordinateTransformations"][0]["scale"]
-
-            # add layer of mask centroids
-            label_array = np.asarray(label_data[level].compute())
-            regions = regionprops(label_array)
-
-            centroid_array = np.empty((len(regions), 3))
-            for rgi, rg in enumerate(regions):
-                centroid_array[rgi, :] = np.multiply(rg.centroid, scale_vec)
-            
-            # convert centroid array to data frame
-            df1 = pd.DataFrame(centroid_array, columns=["Z", "Y", "X"])
-
-            # add additional info
-            area_vec = []
-            for rgi, rg in enumerate(regions):
-                area_vec.append(rg.area)
-            df1.assign(Area=np.asarray(area_vec))
-
-            # calculate axis lengths
-            axis_array = np.empty((len(regions), 3))
-            for rgi, rg in enumerate(regions):
-                axes = ellipsoid_axis_lengths(rg['moments_central'])
-                axis_array[rgi, :] = np.multiply(axes, scale_vec)
-
-            df2 = pd.DataFrame(axis_array, columns=["Axis_1", "Axis_2", "Axis_3"])
-
-            df = pd.concat([df1, df2], axis=1)
-
-        # calculate NN statistics
-        tree = KDTree(df.iloc[:, 0:2], leaf_size=2)
-        nearest_dist, nearest_ind = tree.query(df.iloc[:, 0:2], k=8)
-        mean_nn_dist_vec = np.mean(nearest_dist[:, 1:], axis=0)
-        nn_threshold = mean_nn_dist_vec[nn_k-1]
-        
-        return df, nn_threshold
+    # calculate NN statistics
+    tree = KDTree(df.iloc[:, 0:2], leaf_size=2)
+    nearest_dist, nearest_ind = tree.query(df.iloc[:, 0:2], k=nn_k+1)
+    mean_nn_dist_vec = np.mean(nearest_dist[:, 1:], axis=0)
+    nn_threshold = mean_nn_dist_vec[nn_k-1]
 
     def polyval2d(x, y, m):
         order = int(np.sqrt(len(m))) - 1
@@ -176,10 +79,6 @@ def segment_pec_fins(dataRoot, labelRoot, level):
             G[:, k] = x ** i * y ** j
         m, _, _, _ = np.linalg.lstsq(G, z)
         return m
-    
-    # get data frame
-    global nn_threshold, df
-    df, nn_threshold = load_image_data(dataPath, labelPath, level)
 
     # define mesh grid for curve fitting
     nx = 100
@@ -311,7 +210,7 @@ def segment_pec_fins(dataRoot, labelRoot, level):
             #oint_dict = json.loads(selected_points)
             xyz = np.reshape([[p['x'], p['y'], p['z']] for p in selected_points], (len(selected_points), 3))
             # Fit a 3rd order, 2d polynomial
-            m = polyfit2d(xyz[:, 0], xyz[:, 1], xyz[:, 2], order=1)
+            m = polyfit2d(xyz[:, 0], xyz[:, 1], xyz[:, 2], order=2)
             # Evaluate it on a grid...
             zz = polyval2d(xx, yy, m, )
             # add to figure
@@ -389,12 +288,11 @@ if __name__ == '__main__':
 
     # set parameters
     filename = "2022_12_15 HCR Hand2 Tbx5a Fgf10a_1.zarr"
-    dataRoot = "/Users/nick/Dropbox (Cole Trapnell's Lab)/Nick/pecFin/HCR_Data/built_zarr_files_small/"
-    labelRoot = "/Users/nick/Dropbox (Cole Trapnell's Lab)/Nick/pecFin/HCR_Data/built_zarr_files_small/"
+    dataRoot = "/Users/nick/Dropbox (Cole Trapnell's Lab)/Nick/pecFin/HCR_Data/built_zarr_files/"
     level = 1
 
     # load image data
-    segment_pec_fins(dataRoot, labelRoot, level)
+    segment_pec_fins(dataRoot)
 
     #nucleus_coordinates = pd.read_csv('/Users/nick/test.csv')
     #print(nucleus_coordinates)
