@@ -406,7 +406,7 @@ def write_to_ome_zarr(project_directory, write_directory, write_tiff=False, test
 if __name__ == '__main__':
 
     # set parameters
-    test_flag = True
+    test_flag = False
     make_tiffs = False
     # set paths to raw data
     project_directory = "/mnt/nas/HCR_data/raw/"
