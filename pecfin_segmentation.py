@@ -9,7 +9,7 @@ import plotly.graph_objs as go
 import pandas as pd
 import numpy as np
 import json
-from skimage.measure import label, regionprops, regionprops_table
+from skimage.measure import regionprops
 import itertools
 from scipy.spatial import distance_matrix
 from sklearn.neighbors import KDTree
@@ -41,8 +41,13 @@ def ellipsoid_axis_lengths(central_moments):
     syz = central_moments[0, 1, 1] / m0
     S = np.asarray([[sxx, sxy, sxz], [sxy, syy, syz], [sxz, syz, szz]])
     # determine eigenvalues in descending order
-    eigvals = np.sort(np.linalg.eigvalsh(S))[::-1]
-    return tuple([math.sqrt(20.0 * e) for e in eigvals])
+    eigvals, eigvecs = np.linalg.eig(S)
+    si = np.argsort(eigvals)
+    si = si[::-1]
+    eigvals = eigvals[si]
+    eigvecs[:, si] = eigvecs[:, si]
+
+    return tuple([math.sqrt(20.0 * e) for e in eigvals]), eigvecs
 
 def segment_pec_fins(dataRoot, labelRoot, level):
     filename = "2022_12_22 HCR Sox9a Tbx5a Emilin3a_1"

@@ -1,7 +1,4 @@
 import plotly.express as px
-from dash import dcc
-from dash import html
-from dash.dependencies import Input, Output, State
 from ome_zarr.io import parse_url
 from ome_zarr.reader import Reader
 import plotly.graph_objs as go
@@ -13,7 +10,7 @@ from pecfin_segmentation import ellipsoid_axis_lengths
 
 # define some variables
 level = 1
-filename = "2022_12_15 HCR Hand2 Tbx5a Fgf10a_1"
+filename = "2022_12_15 HCR Sox9a Myod1 Col11a2_2"
 dataRoot = "/Users/nick/Dropbox (Cole Trapnell's Lab)/Nick/pecFin/HCR_Data/built_zarr_files_small/"
 labelRoot = "/Users/nick/Dropbox (Cole Trapnell's Lab)/Nick/pecFin/HCR_Data/built_zarr_files_small/"
 
@@ -22,11 +19,11 @@ labelPath = labelRoot + filename + ".zarrlabels"
 propPath = dataRoot + filename + '_nucleus_props.csv'
 
 reader = Reader(parse_url(dataPath))
-
-# nodes may include images, labels etc
+#
+# # nodes may include images, labels etc
 nodes = list(reader())
-
-# first node will be the image pixel data
+#
+# # first node will be the image pixel data
 image_node = nodes[0]
 image_data = image_node.data
 
@@ -73,7 +70,8 @@ df1 = df1.assign(Area=np.asarray(area_vec))
 # calculate axis lengths
 axis_array = np.empty((len(regions), 3))
 for rgi, rg in enumerate(regions):
-    axes = ellipsoid_axis_lengths(rg['moments_central'])
+    moments = rg['moments_central']
+    axes, axis_dirs = ellipsoid_axis_lengths(moments)
     axis_array[rgi, :] = np.multiply(axes, scale_vec)
 
 df2 = pd.DataFrame(axis_array, columns=["Axis_1", "Axis_2", "Axis_3"])
