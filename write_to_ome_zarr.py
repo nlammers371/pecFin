@@ -224,7 +224,7 @@ def write_to_ome_zarr(project_directory, write_directory, write_tiff=False, test
             if test_flag:
                 outDir = write_directory + '/built_zarr_files_small/'
             else:
-                outDir = write_directory + '/built_zarr_files/'
+                outDir = write_directory + '/built_zarr_files2/'
             zarrurl = f"{outDir + image_name}.zarr"
 
             skip_flag = True
@@ -247,6 +247,7 @@ def write_to_ome_zarr(project_directory, write_directory, write_tiff=False, test
 
             # extract "top level" dimensions for pixel size calculations
             dask_data = dask.array.squeeze(imObject.dask_data)
+            chunk_size = tuple([dask_data[0, :, :, :].shape[0], 256, 256])
             if test_flag:
                 dask_data = dask_data[:, 30:150, 700:1600, 700:1600]
             if not skip_flag:
@@ -289,7 +290,7 @@ def write_to_ome_zarr(project_directory, write_directory, write_tiff=False, test
                             ),
                         }
 
-                write_image(image=dask_data, group=root, scaler=scaler_method, axes="czyx", storage_options=dict(chunks=dask_data.chunksize))
+                write_image(image=dask_data, group=root, scaler=scaler_method, axes="czyx", storage_options=dict(chunks=chunk_size))
 
                 root.attrs["multiscales"] = [
                     {
@@ -404,8 +405,9 @@ if __name__ == '__main__':
 
     # set parameters
     test_flag = True
-    make_tiffs = True
+    make_tiffs = False
     # set paths to raw data
+    #project_directory = "/mnt/nas/HCR_data/built_zarr_files/raw/"
     project_directory = "/Users/nick/Dropbox (Cole Trapnell's Lab)/Nick/pecFin/HCR_Data/raw/"
     # set write paths
     write_directory = "/Users/nick/Dropbox (Cole Trapnell's Lab)/Nick/pecFin/HCR_Data"
