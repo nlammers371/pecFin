@@ -10,7 +10,7 @@ from pecfin_segmentation import ellipsoid_axis_lengths
 
 # define some variables
 level = 1
-filename = "2022_12_15 HCR Sox9a Myod1 Col11a2_2"
+filename = "2022_12_15 HCR Hand2 Tbx5a Fgf10a_1"
 dataRoot = "/Users/nick/Dropbox (Cole Trapnell's Lab)/Nick/pecFin/HCR_Data/built_zarr_files/"
 labelRoot = "/Users/nick/Dropbox (Cole Trapnell's Lab)/Nick/pecFin/HCR_Data/built_zarr_files/"
 
