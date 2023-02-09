@@ -273,9 +273,11 @@ def cellpose_segmentation(
             label_dtype = np.uint32 # NL: this may be way bigger than is actually required
 
             write_store = da.core.get_mapper(f"{zarrurl}labels/{output_label_name}/0")
+            #print(image_data[0][ind_channel, :, :, :].chunksize.type)
+            cs = tuple([image_data[0][ind_channel, :, :, :].chunksize[0], 128, 128])
             mask_zarr = zarr.create(
                 shape=image_data[0][ind_channel, :, :, :].shape,
-                chunks=image_data[0][ind_channel, :, :, :].chunksize,
+                chunks=cs,
                 dtype=label_dtype,
                 store=write_store,
                 overwrite=False,
@@ -321,17 +323,16 @@ def cellpose_segmentation(
                 min_size=min_size,
                 pretrain_flag=(pretrained_model != None)
             )
-
+            #image_mask = np.zeros(data_zyx.shape, dtype='uint32')
             # expand mask image to be at 0-th level resolution
             #image_mask = image_mask.astype(float)
-            #shape0 = image_data[0][ind_channel, :, :, :].shape
+            shape0 = image_data[0][ind_channel, :, :, :].shape
             #image_mask_1 = resize(image_mask, (image_mask.shape[0], shape0[1], shape0[2]), order=0)
-            #image_mask_0 = resize(image_mask, shape0, order=0, anti_aliasing=False, preserve_range=True)
-            #plt.imshow(image_mask_0[5,:,:], cmap='hot', interpolation='nearest')
-            #plt.show()
+            image_mask_0 = resize(image_mask, shape0, order=0, anti_aliasing=False, preserve_range=True)
 
             # Compute and store 0-th level to disk
-            da.array(image_mask).to_zarr(
+            #print(image_mask_0.shape)
+            da.array(image_mask_0).to_zarr(
                 url=mask_zarr,
                 compute=True,
             )
@@ -359,7 +360,7 @@ def cellpose_segmentation(
     return {}
 
 if __name__ == "__main__":
-    zarr_directory = "blah"
+    zarr_directory = "/Users/nick/Dropbox (Cole Trapnell's Lab)/Nick/pecFin/HCR_Data/built_zarr_files/"
 
     # temporaily set parameters
     # zarrurl = "/Users/nick/Dropbox (Cole Trapnell's Lab)/Nick/pecFin/HCR_Data/built_zarr_files_testing/2022_12_15 HCR Hand2 Tbx5a Fgf10a_1.zarr"
