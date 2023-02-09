@@ -176,7 +176,7 @@ def cellpose_segmentation(
     # get list of images
     image_list = sorted(glob.glob(zarr_directory + "*.zarr"))
 
-    for im in range(len(image_list)):
+    for im in range(1,len(image_list)):
         zarrurl = image_list[im]
         # read the image data
         store = parse_url(zarrurl, mode="r").store
@@ -360,23 +360,15 @@ def cellpose_segmentation(
     return {}
 
 if __name__ == "__main__":
-    zarr_directory = "/Users/nick/Dropbox (Cole Trapnell's Lab)/Nick/pecFin/HCR_Data/built_zarr_files/"
-
-    # temporaily set parameters
-    # zarrurl = "/Users/nick/Dropbox (Cole Trapnell's Lab)/Nick/pecFin/HCR_Data/built_zarr_files_testing/2022_12_15 HCR Hand2 Tbx5a Fgf10a_1.zarr"
-    #output_path = "/Users/nick/Dropbox (Cole Trapnell's Lab)/Nick/pecFin/HCR_Data/segmented_zarr_files_testing/2022_12_15 HCR Hand2 Tbx5a Fgf10a_1.zarr"
+    #zarr_directory = "/Users/nick/Dropbox (Cole Trapnell's Lab)/Nick/pecFin/HCR_Data/built_zarr_files/"
+    zarr_directory = "/mnt/nas/HCR_data/built_zarr_files/"
     seg_channel_label = 'DAPI'
     level = 1
-    pretrained_model = "/Users/nick/Dropbox (Cole Trapnell's Lab)/Nick/pecFin/HCR_Data/tiff_training_slices_testing/models/DAPI-Pro-2"
+    pretrained_model = "/home/nickl/Projects/pecFin/cellpose_models/DAPI-Pro-2"
     overwrite = True
     model_type = "nuclei"
     output_label_name = "DAPI"
     test_flag = True
-
-    #diameter_level0 = 80
-    #cellprob_threshold = -0.5
-    #flow_threshold = 0.6  # NL: I don't think this is factored in for 3D
-    #min_size = diameter_level0 ** 3
 
     cellpose_segmentation(zarr_directory=zarr_directory, level=level, seg_channel_label=seg_channel_label,
                           output_label_name=output_label_name, pretrained_model=pretrained_model, overwrite=overwrite)
