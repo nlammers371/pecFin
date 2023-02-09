@@ -409,9 +409,9 @@ if __name__ == '__main__':
     test_flag = True
     make_tiffs = False
     # set paths to raw data
-    project_directory = "/mnt/nas/HCR_data/built_zarr_files/raw/"
+    project_directory = "/mnt/nas/HCR_data/raw/"
     #project_directory = "/Users/nick/Dropbox (Cole Trapnell's Lab)/Nick/pecFin/HCR_Data/raw/"
     # set write paths
-    write_directory = "/mnt/nas/HCR_data/built_zarr_files/"
+    write_directory = "/mnt/nas/HCR_data/"
     # call main function
     write_to_ome_zarr(project_directory, write_directory, overwrite=True, test_flag=test_flag, write_tiff=make_tiffs, match_string='*')
