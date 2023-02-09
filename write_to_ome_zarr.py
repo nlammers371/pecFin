@@ -414,4 +414,4 @@ if __name__ == '__main__':
     # set write paths
     write_directory = "/mnt/nas/HCR_data/"
     # call main function
-    write_to_ome_zarr(project_directory, write_directory, overwrite=True, test_flag=test_flag, write_tiff=make_tiffs, match_string='*')
+    write_to_ome_zarr(project_directory, write_directory, overwrite=False, test_flag=test_flag, write_tiff=make_tiffs, match_string='*')
