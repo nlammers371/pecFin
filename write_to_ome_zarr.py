@@ -189,6 +189,7 @@ def write_to_ome_zarr(project_directory, write_directory, write_tiff=False, test
 
             ################################################################
             # read in metadata
+            print('Reading raw data...')
             imObject = AICSImage(image_path)
 
             # Extract pixel sizes and bit_depth
@@ -230,7 +231,6 @@ def write_to_ome_zarr(project_directory, write_directory, write_tiff=False, test
             skip_flag = True
 
             if os.path.isdir(zarrurl) and not overwrite:
-
                 # look confirm that all subdirectories are completed and non-empty
                 subdir_list = sorted(glob.glob(zarrurl + "/" + "?"))
                 if len(subdir_list) == num_levels:
@@ -249,8 +249,10 @@ def write_to_ome_zarr(project_directory, write_directory, write_tiff=False, test
             dask_data = dask.array.squeeze(imObject.dask_data)
             chunk_size = tuple([dask_data[0, :, :, :].shape[0], 256, 256])
             if test_flag:
-                dask_data = dask_data[:, 30:150, 700:1600, 700:1600]
+                #dask_data = dask_data[:, 30:150, 700:1600, 700:1600]
+                dask_data = dask_data[:, 30:60, 900:1400, 900:1400]
             if not skip_flag:
+                print('Converting raw data...')
                 if os.path.isdir(zarrurl):
                    shutil.rmtree(zarrurl)
 
@@ -263,23 +265,23 @@ def write_to_ome_zarr(project_directory, write_directory, write_tiff=False, test
                 spatial_dims = dask_data.shape
                 spatial_dims = spatial_dims[1:]
 
-                trans_list = [
-                             [
-                                    {
-                                        "type": "scale",
-                                        "scale": [
-                                            np.round(pixel_size_z, 4),
-                                            np.round(pixel_size_y
-                                                     * spatial_dims[1] / (
-                                                         np.floor(spatial_dims[1] / coarsening_factor ** ind_level)), 4),
-                                            np.round(pixel_size_x
-                                                     * spatial_dims[2] / (
-                                                         np.floor(spatial_dims[2] / coarsening_factor ** ind_level)), 4),
-                                        ],
-                                    }
-                                ]
-                            for ind_level in range(num_levels)
-                        ],
+                # trans_list = [
+                #              [
+                #                     {
+                #                         "type": "scale",
+                #                         "scale": [
+                #                             np.round(pixel_size_z, 4),
+                #                             np.round(pixel_size_y
+                #                                      * spatial_dims[1] / (
+                #                                          np.floor(spatial_dims[1] / coarsening_factor ** ind_level)), 4),
+                #                             np.round(pixel_size_x
+                #                                      * spatial_dims[2] / (
+                #                                          np.floor(spatial_dims[2] / coarsening_factor ** ind_level)), 4),
+                #                         ],
+                #                     }
+                #                 ]
+                #             for ind_level in range(num_levels)
+                #         ],
 
                 root.attrs["omero"] = {
                             "id": 1,  # NL: uncertain as to what this is meant to do
@@ -289,7 +291,7 @@ def write_to_ome_zarr(project_directory, write_directory, write_tiff=False, test
                                 channels=channel_dict_list, bit_depth=bit_depth
                             ),
                         }
-
+                print('Saving ome-zarr data...')
                 write_image(image=dask_data, group=root, scaler=scaler_method, axes="czyx", storage_options=dict(chunks=chunk_size))
 
                 root.attrs["multiscales"] = [
@@ -407,10 +409,9 @@ if __name__ == '__main__':
     test_flag = True
     make_tiffs = False
     # set paths to raw data
-    #project_directory = "/mnt/nas/HCR_data/built_zarr_files/raw/"
-    project_directory = "/Users/nick/Dropbox (Cole Trapnell's Lab)/Nick/pecFin/HCR_Data/raw/"
+    project_directory = "/mnt/nas/HCR_data/built_zarr_files/raw/"
+    #project_directory = "/Users/nick/Dropbox (Cole Trapnell's Lab)/Nick/pecFin/HCR_Data/raw/"
     # set write paths
-    write_directory = "/Users/nick/Dropbox (Cole Trapnell's Lab)/Nick/pecFin/HCR_Data"
-
+    write_directory = "/mnt/nas/HCR_data/built_zarr_files/"
     # call main function
     write_to_ome_zarr(project_directory, write_directory, overwrite=True, test_flag=test_flag, write_tiff=make_tiffs, match_string='*')
