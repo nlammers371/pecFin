@@ -11,8 +11,8 @@ from pecfin_segmentation import ellipsoid_axis_lengths
 # define some variables
 level = 1
 filename = "2022_12_15 HCR Sox9a Myod1 Col11a2_2"
-dataRoot = "/Users/nick/Dropbox (Cole Trapnell's Lab)/Nick/pecFin/HCR_Data/built_zarr_files_small/"
-labelRoot = "/Users/nick/Dropbox (Cole Trapnell's Lab)/Nick/pecFin/HCR_Data/built_zarr_files_small/"
+dataRoot = "/Users/nick/Dropbox (Cole Trapnell's Lab)/Nick/pecFin/HCR_Data/built_zarr_files/"
+labelRoot = "/Users/nick/Dropbox (Cole Trapnell's Lab)/Nick/pecFin/HCR_Data/built_zarr_files/"
 
 dataPath = dataRoot + filename + ".zarr"
 labelPath = labelRoot + filename + ".zarrlabels"
@@ -59,21 +59,23 @@ for rgi, rg in enumerate(regions):
     centroid_array[rgi, :] = np.multiply(rg.centroid, scale_vec)
 
 # convert centroid array to data frame
-df1 = pd.DataFrame(centroid_array, columns=["Z", "Y", "X"])
+df = pd.DataFrame(centroid_array, columns=["Z", "Y", "X"])
 
 # add additional info
 area_vec = []
 for rgi, rg in enumerate(regions):
     area_vec.append(rg.area)
-df1 = df1.assign(Area=np.asarray(area_vec))
+df = df.assign(Area=np.asarray(area_vec))
 
 # calculate axis lengths
 axis_array = np.empty((len(regions), 3))
+vec_list = []
 for rgi, rg in enumerate(regions):
     moments = rg['moments_central']
     axes, axis_dirs = ellipsoid_axis_lengths(moments)
     axis_array[rgi, :] = np.multiply(axes, scale_vec)
+    vec_list.append(axis_dirs)
 
 df2 = pd.DataFrame(axis_array, columns=["Axis_1", "Axis_2", "Axis_3"])
-
-df = pd.concat([df1, df2], axis=1)
+df2 = df2.assign(axis_dirs=vec_list)
+df = pd.concat([df, df2], axis=1)
