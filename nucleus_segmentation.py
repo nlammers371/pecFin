@@ -361,7 +361,7 @@ def cellpose_segmentation(
 
 if __name__ == "__main__":
     #zarr_directory = "/Users/nick/Dropbox (Cole Trapnell's Lab)/Nick/pecFin/HCR_Data/built_zarr_files/"
-    zarr_directory = "/mnt/nas/HCR_data/built_zarr_files2/"
+    zarr_directory = "/mnt/nas/HCR_data/built_zarr_files/"
     seg_channel_label = 'DAPI'
     level = 1
     pretrained_model = "/home/nickl/Projects/pecFin/cellpose_models/DAPI-Pro-2"
