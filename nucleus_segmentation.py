@@ -365,7 +365,7 @@ if __name__ == "__main__":
     seg_channel_label = 'DAPI'
     level = 1
     pretrained_model = "/home/nickl/Projects/pecFin/cellpose_models/DAPI-Pro-2"
-    overwrite = True
+    overwrite = False
     model_type = "nuclei"
     output_label_name = "DAPI"
     test_flag = True

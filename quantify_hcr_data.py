@@ -8,7 +8,65 @@ import glob2 as glob
 from skimage.measure import label, regionprops, regionprops_table
 import math
 
+def plot_fin_ellipsoids():
+    import math
+    import plotly.graph_objects as go
+    from plotly.offline import iplot, init_notebook_mode
+    from plotly.graph_objs import Mesh3d
+    import numpy as np
 
+    axis_lengths = np.array([11.89184616, 4.82438505, 1.49761732])
+
+    a = axis_lengths[2]
+    b = axis_lengths[1]
+    c = axis_lengths[0]
+
+    pi = math.pi
+    phi = np.linspace(0, 2 * pi)
+    theta = np.linspace(-pi / 2, pi / 2)
+    phi, theta = np.meshgrid(phi, theta)
+    x = np.cos(theta) * np.sin(phi) * a
+    y = np.cos(theta) * np.cos(phi) * b
+    z = np.sin(theta) * c
+
+    # define a transformation matrix
+    R = np.array([[-0.23933507, -0.90749994, 0.34519933],
+                  [0.15574894, 0.31504453, 0.93621003],
+                  [0.95836371, -0.27783232, -0.06594095]])
+    T = np.zeros((4, 4))
+    C = np.array([4.47448559, 192.68796498, 138.36717904])
+    T[0:3, 0:3] = R
+    T[3, 3] = 1
+    T[0:3, 3] = C
+
+    x = x.flatten()
+    y = y.flatten()
+    z = z.flatten()
+
+    xtf = []
+    ytf = []
+    ztf = []
+
+    for i in range(len(x)):
+        xyz = np.array([z[i], y[i], x[i], 1]).reshape(4, 1)
+        xyz_tf = np.matmul(T, xyz)
+        xyz_tf.flatten()
+        xtf.append(xyz_tf[2][0])
+        ytf.append(xyz_tf[1][0])
+        ztf.append(xyz_tf[0][0])
+
+    fig = go.Figure(data=[go.Mesh3d(x=xtf,
+                                    y=ytf,
+                                    z=ztf,
+                                    alphahull=0)])
+
+    # fig.update_layout(
+    #     scene = dict(
+    #         xaxis = dict(nticks=4, range=[-30,30]+C[0],),
+    #                      yaxis = dict(nticks=4, range=[-30,30]+C[1],),
+    #                      zaxis = dict(nticks=4, range=[-30,30]+C[2],),))
+
+    fig.show()
 def ellipsoid_axis_lengths(central_moments):
     """Compute ellipsoid major, intermediate and minor axis length.
 
@@ -39,7 +97,7 @@ def ellipsoid_axis_lengths(central_moments):
 
     return tuple([math.sqrt(20.0 * e) for e in eigvals]), eigvecs
 
-def extract_nucleus_stats(dataRoot, filename, level):
+def extract_nucleus_stats(dataRoot, level):
 
     # get list of datasets with nucleus labels
     image_list = sorted(glob.glob(dataRoot + "*.zarrlabels"))
@@ -122,4 +180,4 @@ if __name__ == "__main__":
     dataRoot = "/Users/nick/Dropbox (Cole Trapnell's Lab)/Nick/pecFin/HCR_Data/built_zarr_files/"
     labelRoot = "/Users/nick/Dropbox (Cole Trapnell's Lab)/Nick/pecFin/HCR_Data/built_zarr_files/"
 
-    extract_nucleus_stats(dataRoot, filename, level)
+    extract_nucleus_stats(dataRoot, level)
