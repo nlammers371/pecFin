@@ -45,11 +45,11 @@ def logistic_regression(xyz_train, xyz_all, fin_class, RF_flag=True, reps=2):
     if not RF_flag:
         # perform logistic regression
         logistic_reg = LogisticRegression()
-        logistic_reg.fit(xyz_train_exp, fin_class)
+        logistic_reg.fit(xyz_train_exp, fin_class.ravel())
         predictions = logistic_reg.predict(xyz_all_exp)
     else:
         clf = RandomForestClassifier(max_depth=2, random_state=0)
-        clf.fit(xyz_train_exp, fin_class)
+        clf.fit(xyz_train_exp, fin_class.ravel())
         predictions = clf.predict(xyz_all_exp)
 
     return predictions
@@ -82,10 +82,10 @@ def segment_pec_fins(dataRoot):
         imNameList.append(labelName)
 
     #filename = imNameList[0]
-    global fin_points_prev, not_fin_points_prev, class_predictions_curr, curationPath, propPath
+    #global fin_points_prev, not_fin_points_prev, class_predictions_curr, curationPath, propPath
 
-    fin_points_prev = []
-    not_fin_points_prev = []
+    #fin_points_prev = []
+    #not_fin_points_prev = []
 
     def load_nucleus_dataset(filename):
         #global fin_points_prev, not_fin_points_prev, class_predictions_curr, df, curationPath, propPath
@@ -101,9 +101,10 @@ def segment_pec_fins(dataRoot):
         else:
             raise Exception(
                 f"Selected dataset( {filename} ) dataset has no nucleus data. Have you run extract_nucleus_stats?")
-        # not_fin_points_prev = []
-        # fin_points_prev = []
-        # class_predictions_curr = []
+
+        not_fin_points_prev = []
+        fin_points_prev = []
+        class_predictions_curr = []
 
         # load key info from previous session
         not_fin_path = curationPath + 'not_fin_points.pkl'
@@ -120,9 +121,16 @@ def segment_pec_fins(dataRoot):
         if 'pec_fin_flag' in df:
             class_predictions_curr = df['pec_fin_flag']
 
-        return df, class_predictions_curr
+        return {"df": df, "class_predictions_curr": class_predictions_curr, "fin_points_prev": fin_points_prev,
+                "not_fin_points_prev": not_fin_points_prev, "propPath": propPath, "curationPath": curationPath}
 
-    df = load_nucleus_dataset(imNameList[0])
+    df_dict = load_nucleus_dataset(imNameList[0])
+
+    global df, not_fin_points_prev, fin_points_prev, class_predictions_curr
+    df = df_dict["df"]
+    not_fin_points_prev = df_dict["not_fin_points_prev"]
+    fin_points_prev = df_dict["fin_points_prev"]
+    class_predictions_curr = df_dict["class_predictions_curr"]
     # look for saved data from previous curation effort
 
     # calculate NN statistics
@@ -143,12 +151,8 @@ def segment_pec_fins(dataRoot):
     ########################
     # App
     app = dash.Dash(__name__)#, external_stylesheets=external_stylesheets)
-    #app.css.append_css({
-    #    "external_url": "https://codepen.io/chriddyp/pen/bWLwgP.css"
-    #})
-
-    #global fin_points_prev, not_fin_points_prev, class_predictions_curr, df, curationPath, propPath
-
+    global init_toggle
+    init_toggle = True
     def create_figure(df):
         r_vec = np.sqrt(df["X"]**2 + df["Y"]**2 + df["Z"]**2)
         fig = px.scatter_3d(df, x="X", y="Y", z="Z", opacity=0.4, color=r_vec, color_continuous_scale='ice')
@@ -166,6 +170,7 @@ def segment_pec_fins(dataRoot):
                         html.P(id='save-button-hidden', style={'display': 'none'}),
                         dcc.Graph(id='3d_scat', figure=f),
                         #html.Div('selected:'),
+                        html.Div(id='df_list', hidden=True),
                         html.Div(id='not_fin_points', hidden=True),
                         html.Div(id='fin_points', hidden=True),
                         html.Div(id='pfin_nuclei', hidden=True),
@@ -195,61 +200,93 @@ def segment_pec_fins(dataRoot):
             toggle_string = "Non-Pec Fin"
         return f'Click to select {toggle_string} points.'
 
+    # @app.callback(
+    #     Output('dd-output-container', 'children'),
+    #     Input('dataset-dropdown', 'value')
+    # )
+    # def load_wrapper(value):
+    #     return value
+
     @app.callback(
         Output('dd-output-container', 'children'),
         Input('dataset-dropdown', 'value')
     )
-    def update_output(value):
+    def load_wrapper(value):
+        #[xyz_array, not_fin_points_prev, fin_points_prev, class_predictions_curr])
         return value
 
-    @app.callback(Output('df', 'children'),
-                  Input('dd-output-container', 'children'))
-    def load_wrapper(loadName):
-        changed_id_list = [p['prop_id'] for p in dash.callback_context.triggered][0]
-        if 'dataset-dropdown' in changed_id_list:
-            df = load_nucleus_dataset(loadName)
-            return df
+    # @app.callback(Output('df_list', 'children'),
+    #               Input('dd-output-container', 'children'))
+    # def load_wrapper(loadName):
+    #     changed_id_list = [p['prop_id'] for p in dash.callback_context.triggered][0]
+    #
+    #     if 'dd-output-container' in changed_id_list:
+    #         #global df, not_fin_points_prev, fin_points_prev, class_predictions_curr
+    #         print("yep")
+    #         df_dict = load_nucleus_dataset(loadName)
+    #         df = df_dict["df"]
+    #         #print(df.head(2))
+    #         xyz_array = np.asarray(df["X", "Y", "Z"])
+    #         not_fin_points_prev = df_dict["not_fin_points_prev"]
+    #         fin_points_prev = df_dict["fin_points_prev"]
+    #         class_predictions_curr = df_dict["class_predictions_curr"]
+    #         df_list = json.dumps([xyz_array, not_fin_points_prev, fin_points_prev, class_predictions_curr])
+    #         return df_list
 
     @app.callback([Output('not_fin_points', 'children'),
                    Output('fin_points', 'children')],
                     [Input('3d_scat', 'clickData'),
                      Input('clear', 'n_clicks'),
-                     Input('my-toggle-switch-output', 'children')],
+                     Input('my-toggle-switch-output', 'children'),
+                     Input('dd-output-container', 'children')],
                     [State('not_fin_points', 'children'),
-                     State('fin_points', 'children')])
+                     State('fin_points', 'children'),
+                     ])
 
-    def select_point(clickData, n_clicks, toggle_switch, not_fin_points, fin_points):
+    def select_point(clickData, n_clicks, toggle_switch, fileName, not_fin_points, fin_points):
         ctx = dash.callback_context
         ids = [c['prop_id'] for c in ctx.triggered]
         changed_id = [p['prop_id'] for p in dash.callback_context.triggered][0]
         toggle_val = toggle_switch == "Click to select Pec Fin points."
 
-        #print(toggle_val)
+        df_dict = load_nucleus_dataset(fileName)
+
+        not_fin_points_prev = df_dict["not_fin_points_prev"]
+        fin_points_prev = df_dict["fin_points_prev"]
+
+        # print(xyz_array)
+        # df_list = [xyz_array.tolist(), not_fin_points_prev, fin_points_prev, class_predictions_curr]
+        # df_list = json.dumps(df_list)
+        #
+        # df_list = json.loads(df_list)
         # check for previous selections
-        if not_fin_points:
+
+        if not_fin_points and ('dd-output-container' not in changed_id):
             not_fin_results = json.loads(not_fin_points)
         else:
             not_fin_results = []
 
-        if fin_points:
+        if fin_points and ('dd-output-container' not in changed_id):
             fin_results = json.loads(fin_points)
         else:
             fin_results = []
 
         # check for saved points
-        global not_fin_points_prev, fin_points_prev
+        #global not_fin_points_prev, fin_points_prev
+        # not_fin_points_prev = df_list[1]
+        global init_toggle
 
-        if len(not_fin_points_prev) > 0:
-            for p in not_fin_points_prev:
-                if p not in not_fin_results:
-                    not_fin_results.append(p)
-            not_fin_points_prev = []
+        if ('dd-output-container' in changed_id) | init_toggle:
+            if len(not_fin_points_prev) > 0:
+                for p in not_fin_points_prev:
+                    if p not in not_fin_results:
+                        not_fin_results.append(p)
 
-        if len(fin_points_prev) > 0:
-            for p in fin_points_prev:
-                if p not in fin_results:
-                    fin_results.append(p)
-            fin_points_prev = []
+            if len(fin_points_prev) > 0:
+                for p in fin_points_prev:
+                    if p not in fin_results:
+                        fin_results.append(p)
+
 
         if '3d_scat.clickData' in ids:
             if not toggle_val:
@@ -275,28 +312,38 @@ def segment_pec_fins(dataRoot):
                         rm_ind = np.where(xyz_f == xyz_p)
                         fin_results.pop(rm_ind[0][0])
 
-        if 'clear' in changed_id:
+        if ('clear' in changed_id):
             not_fin_results = []
             fin_results = []
 
         not_fin_results = json.dumps(not_fin_results)
         fin_results = json.dumps(fin_results)
-        #coordinates = [[p['x']] for p in not_fin_results]
 
+        init_toggle = False
         return not_fin_results, fin_results
 
     @app.callback([Output('3d_scat', 'figure'),
                    Output('pfin_nuclei', 'children')],
-                [Input('not_fin_points', 'children'),
+                [Input('pfin_nuclei', 'children'),
+                 Input('not_fin_points', 'children'),
                  Input('fin_points', 'children'),
-                 Input('calc-button', 'n_clicks')])
+                 Input('calc-button', 'n_clicks'),
+                 Input('dd-output-container', 'children')])
 
-    def chart_3d(not_fin_points, fin_points, n_clicks):
+    def chart_3d(class_predictions_in, not_fin_points, fin_points, n_clicks, fileName):
+
         global f
+
         # check to see which values have changed
         changed_id = [p['prop_id'] for p in dash.callback_context.triggered][0]
 
+        df_dict = load_nucleus_dataset(fileName)
+        df = df_dict["df"]
+
+        class_predictions_curr = df_dict["class_predictions_curr"]
+
         f = create_figure(df)
+
         f.update_layout(uirevision="Don't change")
         not_fin_points = json.loads(not_fin_points) if not_fin_points else []
         fin_points = json.loads(fin_points) if fin_points else []
@@ -338,7 +385,7 @@ def segment_pec_fins(dataRoot):
                     showlegend=False
                 )
             )
-        global class_predictions_curr
+        # global class_predictions_curr
         if 'calc-button' in changed_id:
             if not_fin_points and fin_points:
                 #oint_dict = json.loads(not_fin_points)
@@ -352,57 +399,67 @@ def segment_pec_fins(dataRoot):
                 class_predictions = logistic_regression(xyz, df[["X", "Y", "Z"]], fin_class_vec)
 
             else:
-                #raise Warning("User mustspecify at least one instance of each class")
-                class_predictions = []
-            class_predictions_curr = class_predictions
+                class_predictions = np.zeros((df.shape[0],))
+        elif (class_predictions_in != None) and ('dd-output-container' not in changed_id):
+            print("here")
+            class_predictions = class_predictions_in
         else:
             class_predictions = class_predictions_curr
 
-        pec_fin_nuclei = np.where(class_predictions == 1)[0]
-        if pec_fin_nuclei.any():
-            f.add_trace(
-                go.Scatter3d(
-                    mode='markers',
-                    x=[df["X"].iloc[p] for p in pec_fin_nuclei],
-                    y=[df["Y"].iloc[p] for p in pec_fin_nuclei],
-                    z=[df["Z"].iloc[p] for p in pec_fin_nuclei],
-                    marker=dict(
-                        color='lightgreen',
-                        opacity=0.5,
-                        size=5),
-                    showlegend=False
-                )
+        pec_fin_nuclei = np.where(np.asarray(class_predictions) == 1)[0]
+        print(pec_fin_nuclei)
+        print(class_predictions)
+        #if pec_fin_nuclei.any():
+        f.add_trace(
+            go.Scatter3d(
+                mode='markers',
+                x=[df["X"].iloc[p] for p in pec_fin_nuclei],
+                y=[df["Y"].iloc[p] for p in pec_fin_nuclei],
+                z=[df["Z"].iloc[p] for p in pec_fin_nuclei],
+                marker=dict(
+                    color='lightgreen',
+                    opacity=0.5,
+                    size=5),
+                showlegend=False
             )
+        )
 
-        return f, pec_fin_nuclei
+        return f, class_predictions
 
     @app.callback(
         Output('save-button-hidden', 'children'),
         [Input('save-button', 'n_clicks'),
             Input('pfin_nuclei', 'children'),
             Input('not_fin_points', 'children'),
-            Input('fin_points', 'children')])
+            Input('fin_points', 'children'),
+            Input('dd-output-container', 'children')])
 
-    def clicks(n_clicks, pec_fin_nuclei, not_fin_points, fin_points):
+    def clicks(n_clicks, class_predictions, not_fin_points, fin_points, fileName):
         changed_id = [p['prop_id'] for p in dash.callback_context.triggered][0]
+
         if 'save-button' in changed_id:
             # save
-            write_file = dataRoot + filename + '_nucleus_props.csv'
+            df_dict = load_nucleus_dataset(fileName)
+            df = df_dict["df"]
+            class_predictions = class_predictions
+            if len(class_predictions) == df.shape[0]:
+                df["pec_fin_flag"] = class_predictions
+            write_file = dataRoot + fileName + '_nucleus_props.csv'
             df.to_csv(write_file)
 
-            write_file2 = dataRoot + filename + '_curation_info/not_fin_points.pkl'
+            write_file2 = dataRoot + fileName + '_curation_info/not_fin_points.pkl'
             with open(write_file2, 'wb') as wf:
                 pickle.dump(not_fin_points, wf)
 
-            write_file3 = dataRoot + filename + '_curation_info/fin_points.pkl'
+            write_file3 = dataRoot + fileName + '_curation_info/fin_points.pkl'
             with open(write_file3, 'wb') as wf:
                 pickle.dump(fin_points, wf)
 
-            # update and save nucleus dataset
-            fin_class_vec = np.zeros((df.shape[0], 1))
-            fin_class_vec[pec_fin_nuclei] = 1
-            df["pec_fin_flag"] = fin_class_vec
-            df.to_csv(propPath)
+            # # update and save nucleus dataset
+            # fin_class_vec = np.zeros((df.shape[0], 1))
+            # fin_class_vec[pec_fin_nuclei] = 1
+            # df["pec_fin_flag"] = fin_class_vec
+            # df.to_csv(propPath)
 
             # write_file3 = dataRoot + filename + '_curation_info/value_slider.pkl'
             # with open(write_file3, 'wb') as wf:

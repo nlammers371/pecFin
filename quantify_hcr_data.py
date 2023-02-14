@@ -7,6 +7,7 @@ import numpy as np
 import glob2 as glob
 from skimage.measure import label, regionprops, regionprops_table
 import math
+import os.path
 
 def plot_fin_ellipsoids():
     import math
@@ -97,86 +98,92 @@ def ellipsoid_axis_lengths(central_moments):
 
     return tuple([math.sqrt(20.0 * e) for e in eigvals]), eigvecs
 
-def extract_nucleus_stats(dataRoot, level):
+def extract_nucleus_stats(dataRoot, level, overwriteFlag = False):
 
     # get list of datasets with nucleus labels
     image_list = sorted(glob.glob(dataRoot + "*.zarrlabels"))
 
     for im in range(len(image_list)):
+
         labelPath = image_list[im]
         labelName = image_list[im].replace(dataRoot, '', 1)
         labelName = labelName.replace('.zarrlabels', '')
         imagePath = dataRoot + labelName + ".zarr"
         savePath = dataRoot + labelName + '_nucleus_props.csv'
 
-        reader = Reader(parse_url(imagePath))
-        #
-        # # nodes may include images, labels etc
-        nodes = list(reader())
-        #
-        # # first node will be the image pixel data
-        image_node = nodes[0]
-        image_data = image_node.data
+        print('Extracting stats for ' + labelName)
 
-        #############
-        # Labels
-        #############
+        readFlag = (not os.path.isfile(savePath)) | overwriteFlag
+        if readFlag:
 
-        # read the image data
-        # store_lb = parse_url(labelPath, mode="r").store
-        reader_lb = Reader(parse_url(labelPath))
+            reader = Reader(parse_url(imagePath))
+            #
+            # # nodes may include images, labels etc
+            nodes = list(reader())
+            #
+            # # first node will be the image pixel data
+            image_node = nodes[0]
+            #image_data = image_node.data
 
-        # nodes may include images, labels etc
-        nodes_lb = list(reader_lb())
+            #############
+            # Labels
+            #############
 
-        # first node will be the image pixel data
-        label_node = nodes_lb[1]
-        label_data = label_node.data
+            # read the image data
+            # store_lb = parse_url(labelPath, mode="r").store
+            reader_lb = Reader(parse_url(labelPath))
 
-        # extract key image attributes
-        # omero_attrs = image_node.root.zarr.root_attrs['omero']
-        # channel_metadata = omero_attrs['channels']  # list of channels and relevant info
-        multiscale_attrs = image_node.root.zarr.root_attrs['multiscales']
+            # nodes may include images, labels etc
+            nodes_lb = list(reader_lb())
 
-        # extract useful info
-        scale_vec = multiscale_attrs[0]["datasets"][level]["coordinateTransformations"][0]["scale"]
+            # first node will be the image pixel data
+            label_node = nodes_lb[1]
+            label_data = label_node.data
 
-        # add layer of mask centroids
-        label_array = np.asarray(label_data[level].compute())
-        regions = regionprops(label_array)
+            # extract key image attributes
+            # omero_attrs = image_node.root.zarr.root_attrs['omero']
+            # channel_metadata = omero_attrs['channels']  # list of channels and relevant info
+            multiscale_attrs = image_node.root.zarr.root_attrs['multiscales']
 
-        centroid_array = np.empty((len(regions), 3))
-        for rgi, rg in enumerate(regions):
-            centroid_array[rgi, :] = np.multiply(rg.centroid, scale_vec)
+            # extract useful info
+            scale_vec = multiscale_attrs[0]["datasets"][level]["coordinateTransformations"][0]["scale"]
 
-        # convert centroid array to data frame
-        df = pd.DataFrame(centroid_array, columns=["Z", "Y", "X"])
+            # add layer of mask centroids
+            label_array = np.asarray(label_data[level].compute())
+            regions = regionprops(label_array)
 
-        # add additional info
-        area_vec = []
-        for rgi, rg in enumerate(regions):
-            area_vec.append(rg.area)
-        df = df.assign(Area=np.asarray(area_vec))
+            centroid_array = np.empty((len(regions), 3))
+            for rgi, rg in enumerate(regions):
+                centroid_array[rgi, :] = np.multiply(rg.centroid, scale_vec)
 
-        # calculate axis lengths
-        axis_array = np.empty((len(regions), 3))
-        vec_list = []
-        for rgi, rg in enumerate(regions):
-            moments = rg['moments_central']
-            axes, axis_dirs = ellipsoid_axis_lengths(moments)
-            axis_array[rgi, :] = np.multiply(axes, scale_vec)
-            vec_list.append(axis_dirs)
+            # convert centroid array to data frame
+            df = pd.DataFrame(centroid_array, columns=["Z", "Y", "X"])
 
-        df2 = pd.DataFrame(axis_array, columns=["Axis_1", "Axis_2", "Axis_3"])
-        df2 = df2.assign(axis_dirs=vec_list)
-        df = pd.concat([df, df2], axis=1)
+            # add additional info
+            area_vec = []
+            for rgi, rg in enumerate(regions):
+                area_vec.append(rg.area)
+            df = df.assign(Area=np.asarray(area_vec))
 
-        df.to_csv(savePath)
+            # calculate axis lengths
+            axis_array = np.empty((len(regions), 3))
+            vec_list = []
+            for rgi, rg in enumerate(regions):
+                moments = rg['moments_central']
+                axes, axis_dirs = ellipsoid_axis_lengths(moments)
+                axis_array[rgi, :] = np.multiply(axes, scale_vec)
+                vec_list.append(axis_dirs)
 
+            df2 = pd.DataFrame(axis_array, columns=["Axis_1", "Axis_2", "Axis_3"])
+            df2 = df2.assign(axis_dirs=vec_list)
+            df = pd.concat([df, df2], axis=1)
+
+            df.to_csv(savePath)
+    else:
+        print("Skipping " + labelName + ". File already exists.")
 if __name__ == "__main__":
     # define some variables
     level = 1
-    filename = "2022_12_15 HCR Hand2 Tbx5a Fgf10a_1"
     dataRoot = "/Users/nick/Dropbox (Cole Trapnell's Lab)/Nick/pecFin/HCR_Data/built_zarr_files/"
     labelRoot = "/Users/nick/Dropbox (Cole Trapnell's Lab)/Nick/pecFin/HCR_Data/built_zarr_files/"
 

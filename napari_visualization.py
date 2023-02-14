@@ -6,10 +6,10 @@ from napari_animation import Animation
 from skimage.measure import label, regionprops, regionprops_table
 
 # set parameters
-filename = "2022_12_15 HCR Hand2 Tbx5a Fgf10a_1.zarr"
+filename = "2022_12_15 HCR Sox9a Myod1 Col11a2_1.zarr"
 readPath = "/Users/nick/Dropbox (Cole Trapnell's Lab)/Nick/pecFin/HCR_Data/built_zarr_files/" + filename
 readPathLabels = "/Users/nick/Dropbox (Cole Trapnell's Lab)/Nick/pecFin/HCR_Data/built_zarr_files/" + filename + "labels"
-level = 1
+level=2
 
 #############
 # Main image
@@ -71,5 +71,6 @@ for rgi, rg in enumerate(regions):
 
 points = np.array([[100, 100, 100], [50, 200, 200], [10, 300, 100]])
 points_layer = viewer.add_points(centroid_array, size=3, name='Centroids', scale=scale_vec)
+
 if __name__ == '__main__':
     napari.run()
