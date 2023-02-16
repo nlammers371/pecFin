@@ -214,7 +214,6 @@ def cellpose_segmentation(
         #data_zyx = da.from_zarr(f"{zarrurl}{level}")[ind_channel]
         logger.info(f"{data_zyx.shape=}")
 
-
         # Read pixel sizes from zattrs file
         full_res_pxl_sizes_zyx = dataset_info[0]["coordinateTransformations"][0]["scale"]
         actual_res_pxl_sizes_zyx = dataset_info[level]["coordinateTransformations"][0]["scale"]
@@ -222,9 +221,6 @@ def cellpose_segmentation(
         # calculate anisotropy
         anisotropy = actual_res_pxl_sizes_zyx[0]/actual_res_pxl_sizes_zyx[1]
         # resample z to make it isotropic
-        #us_factor = np.round(data_zyx.shape[0]*anisotropy)
-
-        #data_zyx = resize(data_zyx, (us_factor, data_zyx.shape[1], data_zyx.shape[2]), order=1, preserve_range=True)
 
         # Select 2D/3D behavior and set some parameters
         do_3D = data_zyx.shape[0] > 1

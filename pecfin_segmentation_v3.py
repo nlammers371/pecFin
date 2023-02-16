@@ -401,14 +401,11 @@ def segment_pec_fins(dataRoot):
             else:
                 class_predictions = np.zeros((df.shape[0],))
         elif (class_predictions_in != None) and ('dd-output-container' not in changed_id):
-            print("here")
             class_predictions = class_predictions_in
         else:
             class_predictions = class_predictions_curr
 
         pec_fin_nuclei = np.where(np.asarray(class_predictions) == 1)[0]
-        print(pec_fin_nuclei)
-        print(class_predictions)
         #if pec_fin_nuclei.any():
         f.add_trace(
             go.Scatter3d(

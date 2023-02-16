@@ -6,10 +6,10 @@ from napari_animation import Animation
 from skimage.measure import label, regionprops, regionprops_table
 
 # set parameters
-filename = "2022_12_15 HCR Sox9a Myod1 Col11a2_1.zarr"
+filename = "2022_12_22 HCR Sox9a Tbx5a Emilin3a_2.zarr"
 readPath = "/Users/nick/Dropbox (Cole Trapnell's Lab)/Nick/pecFin/HCR_Data/built_zarr_files/" + filename
 readPathLabels = "/Users/nick/Dropbox (Cole Trapnell's Lab)/Nick/pecFin/HCR_Data/built_zarr_files/" + filename + "labels"
-level=2
+level = 2
 
 #############
 # Main image
