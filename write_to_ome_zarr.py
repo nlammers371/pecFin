@@ -164,7 +164,6 @@ def write_to_ome_zarr(project_directory, write_directory, write_tiff=False, test
 
         # set paths to raw data
         for im in range(len(image_list)):
-            #im = 0
 
             image_path = Path(image_list[im])
             image_name = image_list[im].replace(image_read_dir, '', 1)
@@ -249,6 +248,7 @@ def write_to_ome_zarr(project_directory, write_directory, write_tiff=False, test
             if test_flag:
                 #dask_data = dask_data[:, 30:150, 700:1600, 700:1600]
                 dask_data = dask_data[:, 30:60, 900:1400, 900:1400]
+
             if not skip_flag:
                 print('Converting raw data...')
                 if os.path.isdir(zarrurl):

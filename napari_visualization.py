@@ -6,10 +6,10 @@ from napari_animation import Animation
 from skimage.measure import label, regionprops, regionprops_table
 
 # set parameters
-filename = "2022_12_22 HCR Sox9a Tbx5a Emilin3a_2.zarr"
+filename = "2022_12_15 HCR Hand2 Tbx5a Fgf10a_3.zarr"
 readPath = "/Users/nick/Dropbox (Cole Trapnell's Lab)/Nick/pecFin/HCR_Data/built_zarr_files/" + filename
-readPathLabels = "/Users/nick/Dropbox (Cole Trapnell's Lab)/Nick/pecFin/HCR_Data/built_zarr_files/" + filename + "labels"
-level = 2
+readPathLabels = "/Users/nick/Dropbox (Cole Trapnell's Lab)/Nick/pecFin/HCR_Data/built_zarr_files/" + filename + "labels" #"/Users/nick/Dropbox (Cole Trapnell's Lab)/Nick/pecFin/HCR_Data/built_zarr_files/" + filename + "labels"
+level = 0
 
 #############
 # Main image
@@ -31,7 +31,6 @@ image_data = image_node.data
 #############
 
 # read the image data
-store_lb = parse_url(readPathLabels, mode="r").store
 reader_lb = Reader(parse_url(readPathLabels))
 
 # nodes may include images, labels etc
@@ -55,10 +54,10 @@ res_upper = np.percentile(im_3[3, :, :, :], 99.999)
 # extract useful info
 scale_vec = multiscale_attrs[0]["datasets"][level]["coordinateTransformations"][0]["scale"]
 channel_names = [channel_metadata[i]["label"] for i in range(len(channel_metadata))]
-colormaps = [channel_metadata[i]["color"] for i in range(len(channel_metadata))]
+#colormaps = [channel_metadata[i]["color"] for i in range(len(channel_metadata))]
 
 
-viewer = napari.view_image(image_data[level], channel_axis=0, name=channel_names, colormap=colormaps, contrast_limits=[0, res_upper], scale=scale_vec)
+viewer = napari.view_image(image_data[level], channel_axis=0, name=channel_names, contrast_limits=[0, res_upper], scale=scale_vec)
 labels_layer = viewer.add_labels(label_data[level], name='segmentation', scale=scale_vec)
 
 # add layer of mask centroids
