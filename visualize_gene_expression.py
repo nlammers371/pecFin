@@ -13,7 +13,8 @@ import glob2 as glob
 from skimage.measure import regionprops
 import itertools
 import os
-
+from scipy.interpolate import LinearNDInterpolator
+import alphashape
 
 def segment_pec_fins(dataRoot):
 
@@ -60,6 +61,18 @@ def segment_pec_fins(dataRoot):
         fin_nuclei = np.where(df["pec_fin_flag"] == 1)
         df = df.iloc[fin_nuclei]
 
+        # normalize gene expression levels
+        colnames = df.columns
+        list_raw = [item for item in colnames if "_cell_mean_nn" in item]
+        gene_names = [item.replace("_cell_mean_nn", "") for item in list_raw]
+
+        for g in gene_names:
+            ind_list = [i for i in range(len(colnames)) if g in colnames[i]]
+            for ind in ind_list:
+                colname = colnames[ind]
+                c_max = np.max(df[colname])
+                df[colname] = df.loc[:, colname] / c_max
+
         return df
 
     global df, colnames, gene_names
@@ -71,13 +84,14 @@ def segment_pec_fins(dataRoot):
     list_raw = [item for item in colnames if "_cell_mean_nn" in item]
     gene_names = [item.replace("_cell_mean_nn", "") for item in list_raw]
 
+    plot_list = ["3D Scatter", "Volume Plot"]
     ########################
     # App
     app = dash.Dash(__name__)  # , external_stylesheets=external_stylesheets)
     # global init_toggle
     # init_toggle = True
 
-    def create_figure(df, gene_name=None):
+    def create_figure(df, gene_name=None, plot_type=None):
         colormaps = ["ice", "inferno", "viridis"]
 
         if gene_name == None:
@@ -87,9 +101,63 @@ def segment_pec_fins(dataRoot):
             plot_gene = gene_name + "_mean"
             g_index = gene_names.index(gene_name)
             cmap = colormaps[g_index]
-        fig = px.scatter_3d(df, x="X", y="Y", z="Z", opacity=0.4, color=plot_gene, color_continuous_scale=cmap)
-        fig.update_traces(marker=dict(size=6))
-        #fig.update_layout(coloraxis_showscale=False)
+
+        if (plot_type == None) | (plot_type == "3D Scatter"):
+            fig = px.scatter_3d(df, x="X", y="Y", z="Z", opacity=0.4, color=plot_gene, color_continuous_scale=cmap)
+            fig.update_traces(marker=dict(size=8))
+
+        elif plot_type == "Volume Plot":
+            
+            # generate points to interpolate
+            xx = np.linspace(min(df["X"]), max(df["X"]), num=30)
+            yy = np.linspace(min(df["Y"]), max(df["Y"]), num=30)
+            zz = np.linspace(min(df["Z"]), max(df["Z"]), num=30)
+
+            X, Y, Z = np.meshgrid(xx, yy, zz)  # 3D grid for interpolation
+
+            # generate normalized arrays
+            X_norm = X / np.max(X)
+            Y_norm = Y / np.max(Y)
+            Z_norm = Z / np.max(Z)
+
+            # generate interpolator
+            xyz_array = np.asarray(df[["X", "Y", "Z"]])
+            gene_values = np.asarray(df[plot_gene])
+            interp = LinearNDInterpolator(xyz_array, gene_values)
+
+            # get interpolated estimate of gene expression
+            G = interp(X, Y, Z)
+
+            # generate alpha shape
+            xyz_array_norm = np.divide(xyz_array, np.asarray([np.max(X), np.max(Y), np.max(Z)]))
+            alpha_fin = alphashape.alphashape(xyz_array_norm, 9)
+            xyz_long = np.concatenate((np.reshape(X_norm, (X.size, 1)),
+                                       np.reshape(Y_norm, (Y.size, 1)),
+                                       np.reshape(Z_norm, (Z.size, 1))),
+                                      axis=1)
+            inside_flags = alpha_fin.contains(xyz_long)
+            G_long = G.flatten()
+            G_long[~inside_flags] = np.nan
+
+            fig = go.Figure(data=go.Volume(
+                x=X.flatten(),
+                y=Y.flatten(),
+                z=Z.flatten(),
+                value=G_long,
+                opacity=.1,
+                isomin=0.2,
+                isomax=0.8,  # needs to be small to see through all surfaces
+                surface_count=25,  # needs to be a large number for good volume rendering
+                colorscale=cmap
+            ))
+
+            fig.add_trace(go.Mesh3d(x=xyz_array[:, 0], y=xyz_array[:, 1], z=xyz_array[:, 2],
+                                    alphahull=9,
+                                    opacity=0.1,
+                                    color='gray'))
+        else:
+            fig = px.scatter_3d(df, x="X", y="Y", z="Z", opacity=0.4)
+            raise Warning("Plot type " + plot_type + " is not currently supported")
 
         return fig
 
@@ -97,19 +165,31 @@ def segment_pec_fins(dataRoot):
 
     app.layout = html.Div([
                         dcc.Graph(id='3d_scat', figure=f),
+
                         html.Div(id='df_list', hidden=True),
                         html.Div([
                             dcc.Dropdown(imNameList, imNameList[0], id='dataset-dropdown'),
                         ],
                         style={'width': '30%', 'display': 'inline-block'}),
                         html.Div(id='dd-output-container', hidden=True),
+
                         html.Div([
                             dcc.Dropdown(id='gene-dropdown'),
                         ],
                             style={'width': '20%', 'display': 'inline-block'}),
-                            html.Div(id='gene-output-container', hidden=True)
-                        ]
-                        )
+                            html.Div(id='gene-output-container', hidden=True),
+
+                        # html.Div([
+                        #     dcc.Dropdown(plot_list, id='plot-dropdown'),
+                        #     html.Div(id='plot-output-container')
+                        # ])
+                        html.Div(id='plot_list', hidden=True),
+                        html.Div([
+                            dcc.Dropdown(plot_list, plot_list[0], id='plot-dropdown'),
+                        ],
+                        style={'width': '20%', 'display': 'inline-block'}),
+                        html.Div(id='plot-output-container', hidden=True)
+                        ])
 
     # update list of genes
     @app.callback(
@@ -137,9 +217,10 @@ def segment_pec_fins(dataRoot):
 
     @app.callback(Output('3d_scat', 'figure'),
                   [Input('gene-dropdown', 'value'),
-                   Input('dataset-dropdown', 'value')])
+                   Input('dataset-dropdown', 'value'),
+                   Input('plot-dropdown', 'value')])
 
-    def chart_3d(gene_name, fileName):
+    def chart_3d(gene_name, fileName, plot_type):
 
         global f, df, gene_names
 
@@ -153,7 +234,7 @@ def segment_pec_fins(dataRoot):
         list_raw = [item for item in colnames if "_cell_mean_nn" in item]
         gene_names = [item.replace("_cell_mean_nn", "") for item in list_raw]
 
-        f = create_figure(df, gene_name)
+        f = create_figure(df, gene_name, plot_type)
 
         f.update_layout(uirevision="Don't change")
         return f
