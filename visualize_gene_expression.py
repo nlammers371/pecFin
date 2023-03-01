@@ -95,16 +95,45 @@ def segment_pec_fins(dataRoot):
         colormaps = ["ice", "inferno", "viridis"]
 
         if gene_name == None:
-            plot_gene = gene_names[0] + "_mean"
+            plot_gene = gene_names[0] + "_mean_nn"
             cmap = colormaps[0]
         else:
-            plot_gene = gene_name + "_mean"
+            plot_gene = gene_name + "_mean_nn"
             g_index = gene_names.index(gene_name)
             cmap = colormaps[g_index]
 
+        xyz_array = np.asarray(df[["X", "Y", "Z"]])
+
         if (plot_type == None) | (plot_type == "3D Scatter"):
-            fig = px.scatter_3d(df, x="X", y="Y", z="Z", opacity=0.4, color=plot_gene, color_continuous_scale=cmap)
-            fig.update_traces(marker=dict(size=8))
+            high_flags = df[plot_gene] >= 0.3
+            low_flags = df[plot_gene] < 0.3
+            fig = px.scatter_3d(df.iloc[np.where(high_flags)], x="X", y="Y", z="Z", opacity=0.5, color=plot_gene,
+                                color_continuous_scale=cmap, range_color=(0, 1))
+
+            fig.update_traces(marker=dict(size=8
+                                          ))
+
+            fig.add_trace(go.Scatter3d(x=df["X"].iloc[np.where(low_flags)],
+                                       y=df["Y"].iloc[np.where(low_flags)],
+                                       z=df["Z"].iloc[np.where(low_flags)],
+                                       mode='markers',
+                                       marker=dict(
+                                           size=5,
+                                           color=df[plot_gene].iloc[np.where(low_flags)],  # set color to an array/list of desired values
+                                           colorscale=cmap,  # choose a colorscale
+                                           opacity=0.1,
+                                           cmin=0,
+                                           cmax=1)
+                                       ))
+            fig.update_layout(coloraxis_colorbar_title_text='Normalized Expression')
+            fig.update_layout(showlegend=False)
+            # fig = px.scatter_3d(df.iloc[high_flags], x="X", y="Y", z="Z", opacity=0.6, size=plot_gene, color=plot_gene, color_continuous_scale=cmap)
+            # fig.update_traces(marker=dict(size=8))
+
+            fig.add_trace(go.Mesh3d(x=xyz_array[:, 0], y=xyz_array[:, 1], z=xyz_array[:, 2],
+                                    alphahull=9,
+                                    opacity=0.1,
+                                    color='gray'))
 
         elif plot_type == "Volume Plot":
             
@@ -121,7 +150,6 @@ def segment_pec_fins(dataRoot):
             Z_norm = Z / np.max(Z)
 
             # generate interpolator
-            xyz_array = np.asarray(df[["X", "Y", "Z"]])
             gene_values = np.asarray(df[plot_gene])
             interp = LinearNDInterpolator(xyz_array, gene_values)
 
