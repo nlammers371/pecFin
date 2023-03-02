@@ -84,7 +84,7 @@ def segment_pec_fins(dataRoot):
     list_raw = [item for item in colnames if "_cell_mean_nn" in item]
     gene_names = [item.replace("_cell_mean_nn", "") for item in list_raw]
 
-    plot_list = ["3D Scatter", "Volume Plot"]
+    plot_list = ["3D Scatter", "Volume Plot", "Multiplot"]
     ########################
     # App
     app = dash.Dash(__name__)  # , external_stylesheets=external_stylesheets)
@@ -183,6 +183,76 @@ def segment_pec_fins(dataRoot):
                                     alphahull=9,
                                     opacity=0.1,
                                     color='gray'))
+
+            fig.update_layout(coloraxis_colorbar_title_text='Normalized Expression')
+
+        elif plot_type == "Multiplot":
+            # fig = px.scatter_3d(df, x="X", y="Y", z="Z", opacity=0.4)
+            # raise Warning("Plot type " + plot_type + " is not currently supported")
+            # generate points to interpolate
+            xx = np.linspace(min(df["X"]), max(df["X"]), num=30)
+            yy = np.linspace(min(df["Y"]), max(df["Y"]), num=30)
+            zz = np.linspace(min(df["Z"]), max(df["Z"]), num=30)
+
+            X, Y, Z = np.meshgrid(xx, yy, zz)  # 3D grid for interpolation
+
+            # generate normalized arrays
+            X_norm = X / np.max(X)
+            Y_norm = Y / np.max(Y)
+            Z_norm = Z / np.max(Z)
+
+            # generate interpolator
+            gene_values1 = np.asarray(df[gene_names[0] + "_mean_nn"])
+            interp1 = LinearNDInterpolator(xyz_array, gene_values1)
+
+            gene_values2 = np.asarray(df[gene_names[1] + "_mean_nn"])
+            interp2 = LinearNDInterpolator(xyz_array, gene_values2)
+
+            # get interpolated estimate of gene expression
+            G1 = interp1(X, Y, Z)
+            G2 = interp2(X, Y, Z)
+
+            # generate alpha shape
+            xyz_array_norm = np.divide(xyz_array, np.asarray([np.max(X), np.max(Y), np.max(Z)]))
+            alpha_fin = alphashape.alphashape(xyz_array_norm, 9)
+            xyz_long = np.concatenate((np.reshape(X_norm, (X.size, 1)),
+                                       np.reshape(Y_norm, (Y.size, 1)),
+                                       np.reshape(Z_norm, (Z.size, 1))),
+                                      axis=1)
+            inside_flags = alpha_fin.contains(xyz_long)
+
+            G1_long = G1.flatten()
+            G1_long[~inside_flags] = np.nan
+            G1_indices = np.where(G1_long >= 0.3)
+
+            G2_long = G2.flatten()
+            G2_long[~inside_flags] = np.nan
+            G2_indices = np.where(G2_long >= 0.3)
+
+            fig = go.Figure(data=go.Volume(
+                x=X.flatten(),
+                y=Y.flatten(),
+                z=Z.flatten(),
+                value=G1_long,
+                opacity=.1,
+                isomin=0.2,
+                isomax=0.8,  # needs to be small to see through all surfaces
+                surface_count=25,  # needs to be a large number for good volume rendering
+                colorscale=colormaps[0]
+            ))
+
+            fig.add_trace(go.Mesh3d(x=xyz_array[:, 0], y=xyz_array[:, 1], z=xyz_array[:, 2],
+                                    alphahull=9,
+                                    opacity=0.1,
+                                    color='gray'))
+
+            fig.add_trace(go.Mesh3d(x=xyz_array[:, 0], y=xyz_array[:, 1], z=xyz_array[:, 2],
+                                    alphahull=9,
+                                    opacity=0.1,
+                                    color='gray'))
+
+            fig.update_layout(coloraxis_colorbar_title_text='Normalized Expression')
+
         else:
             fig = px.scatter_3d(df, x="X", y="Y", z="Z", opacity=0.4)
             raise Warning("Plot type " + plot_type + " is not currently supported")

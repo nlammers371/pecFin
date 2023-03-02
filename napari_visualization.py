@@ -6,7 +6,7 @@ from napari_animation import Animation
 from skimage.measure import label, regionprops, regionprops_table
 
 # set parameters
-filename = "2022_12_15 HCR Hand2 Tbx5a Fgf10a_3.zarr"
+filename = "2022_12_21 HCR Prdm1a Robo3 Fgf10a_2.zarr"
 readPath = "/Users/nick/Dropbox (Cole Trapnell's Lab)/Nick/pecFin/HCR_Data/built_zarr_files/" + filename
 readPathLabels = "/Users/nick/Dropbox (Cole Trapnell's Lab)/Nick/pecFin/HCR_Data/built_zarr_files/" + filename + "labels" #"/Users/nick/Dropbox (Cole Trapnell's Lab)/Nick/pecFin/HCR_Data/built_zarr_files/" + filename + "labels"
 level = 0
@@ -48,16 +48,16 @@ axis_names = multiscale_attrs[0]['axes']
 dataset_info = multiscale_attrs[0]['datasets']  # list containing scale factors for each axis
 
 # pull second-smallest image and experiment
-im_3 = np.asarray(image_data[level])
+#im_3 = np.asarray(image_data[level])
 # calculate upper resolution limit for display
-res_upper = np.percentile(im_3[3, :, :, :], 99.999)
+#res_upper = np.percentile(im_3[3, :, :, :], 99.999)
 # extract useful info
 scale_vec = multiscale_attrs[0]["datasets"][level]["coordinateTransformations"][0]["scale"]
 channel_names = [channel_metadata[i]["label"] for i in range(len(channel_metadata))]
 #colormaps = [channel_metadata[i]["color"] for i in range(len(channel_metadata))]
 
 
-viewer = napari.view_image(image_data[level], channel_axis=0, name=channel_names, contrast_limits=[0, res_upper], scale=scale_vec)
+viewer = napari.view_image(image_data[level], channel_axis=0, name=channel_names, scale=scale_vec)
 labels_layer = viewer.add_labels(label_data[level], name='segmentation', scale=scale_vec)
 
 # add layer of mask centroids
