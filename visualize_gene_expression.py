@@ -167,7 +167,8 @@ def segment_pec_fins(dataRoot):
             G_long = G.flatten()
             G_long[~inside_flags] = np.nan
 
-            fig = go.Figure(data=go.Volume(
+            fig = go.Figure(
+                data=go.Volume(
                 x=X.flatten(),
                 y=Y.flatten(),
                 z=Z.flatten(),
@@ -175,7 +176,7 @@ def segment_pec_fins(dataRoot):
                 opacity=.1,
                 isomin=0.2,
                 isomax=0.8,  # needs to be small to see through all surfaces
-                surface_count=25,  # needs to be a large number for good volume rendering
+                surface_count=15,  # needs to be a large number for good volume rendering
                 colorscale=cmap
             ))
 
@@ -190,9 +191,9 @@ def segment_pec_fins(dataRoot):
             # fig = px.scatter_3d(df, x="X", y="Y", z="Z", opacity=0.4)
             # raise Warning("Plot type " + plot_type + " is not currently supported")
             # generate points to interpolate
-            xx = np.linspace(min(df["X"]), max(df["X"]), num=30)
-            yy = np.linspace(min(df["Y"]), max(df["Y"]), num=30)
-            zz = np.linspace(min(df["Z"]), max(df["Z"]), num=30)
+            xx = np.linspace(min(df["X"]), max(df["X"]), num=25)
+            yy = np.linspace(min(df["Y"]), max(df["Y"]), num=25)
+            zz = np.linspace(min(df["Z"]), max(df["Z"]), num=25)
 
             X, Y, Z = np.meshgrid(xx, yy, zz)  # 3D grid for interpolation
 
@@ -208,9 +209,13 @@ def segment_pec_fins(dataRoot):
             gene_values2 = np.asarray(df[gene_names[1] + "_mean_nn"])
             interp2 = LinearNDInterpolator(xyz_array, gene_values2)
 
+            gene_values3 = np.asarray(df[gene_names[2] + "_mean_nn"])
+            interp3 = LinearNDInterpolator(xyz_array, gene_values3)
+
             # get interpolated estimate of gene expression
             G1 = interp1(X, Y, Z)
             G2 = interp2(X, Y, Z)
+            G3 = interp3(X, Y, Z)
 
             # generate alpha shape
             xyz_array_norm = np.divide(xyz_array, np.asarray([np.max(X), np.max(Y), np.max(Z)]))
@@ -219,39 +224,55 @@ def segment_pec_fins(dataRoot):
                                        np.reshape(Y_norm, (Y.size, 1)),
                                        np.reshape(Z_norm, (Z.size, 1))),
                                       axis=1)
+
+            xyz_long2 = np.concatenate((np.reshape(X, (X.size, 1)),
+                                        np.reshape(Y, (Y.size, 1)),
+                                        np.reshape(Z, (Z.size, 1))),
+                                        axis=1)
+
             inside_flags = alpha_fin.contains(xyz_long)
 
             G1_long = G1.flatten()
             G1_long[~inside_flags] = np.nan
-            G1_indices = np.where(G1_long >= 0.3)
+            G1_indices = np.where(G1_long >= 0.4)
 
             G2_long = G2.flatten()
             G2_long[~inside_flags] = np.nan
-            G2_indices = np.where(G2_long >= 0.3)
+            G2_indices = np.where(G2_long >= 0.4)
 
-            fig = go.Figure(data=go.Volume(
-                x=X.flatten(),
-                y=Y.flatten(),
-                z=Z.flatten(),
-                value=G1_long,
-                opacity=.1,
-                isomin=0.2,
-                isomax=0.8,  # needs to be small to see through all surfaces
-                surface_count=25,  # needs to be a large number for good volume rendering
-                colorscale=colormaps[0]
-            ))
+            G3_long = G3.flatten()
+            G3_long[~inside_flags] = np.nan
+            G3_indices = np.where(G3_long >= 0.4)
+
+
+
+            fig = go.Figure(data=go.Mesh3d(x=xyz_long2[G1_indices, 0][0], y=xyz_long2[G1_indices, 1][0], z=xyz_long2[G1_indices, 2][0],
+                                    alphahull=9,
+                                    opacity=0.2,
+                                    color='blue',
+                                    name=gene_names[0]))
+
+            #print(xyz_long2[G1_indices, 0])
+            fig.add_trace(go.Mesh3d(x=xyz_long2[G2_indices, 0][0], y=xyz_long2[G2_indices, 1][0], z=xyz_long2[G2_indices, 2][0],
+                                    alphahull=15,
+                                    opacity=0.2,
+                                    color='red',
+                                    name=gene_names[1]))
+
+            fig.add_trace(
+                go.Mesh3d(x=xyz_long2[G3_indices, 0][0], y=xyz_long2[G3_indices, 1][0], z=xyz_long2[G3_indices, 2][0],
+                          alphahull=9,
+                          opacity=0.2,
+                          color='green',
+                          name=gene_names[2]))
 
             fig.add_trace(go.Mesh3d(x=xyz_array[:, 0], y=xyz_array[:, 1], z=xyz_array[:, 2],
                                     alphahull=9,
                                     opacity=0.1,
                                     color='gray'))
 
-            fig.add_trace(go.Mesh3d(x=xyz_array[:, 0], y=xyz_array[:, 1], z=xyz_array[:, 2],
-                                    alphahull=9,
-                                    opacity=0.1,
-                                    color='gray'))
-
-            fig.update_layout(coloraxis_colorbar_title_text='Normalized Expression')
+            fig.update_layout(showlegend=True)
+            fig.update_layout(legend_title_text='Gene Name')
 
         else:
             fig = px.scatter_3d(df, x="X", y="Y", z="Z", opacity=0.4)

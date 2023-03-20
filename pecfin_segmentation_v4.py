@@ -25,7 +25,7 @@ import dash_daq as daq
 from itertools import product
 
 
-def logistic_regression(xyz_train, xyz_all, fin_class, RF_flag=False, reps=2):
+def logistic_regression(xyz_train, xyz_all, fin_class, RF_flag=True, reps=2):
 
     # convert to pandas data frames
     xyz_train_df = pd.DataFrame(xyz_train.astype(float), columns=["X", "Y", "Z"])
@@ -74,11 +74,11 @@ def segment_pec_fins(dataRoot):
 
     global fileList, imNameList
     # get list of filepaths
-    fileList = sorted(glob.glob(dataRoot + '*_nucleus_props_v2.csv'))
+    fileList = sorted(glob.glob(dataRoot + '*_nucleus_props.csv'))
     imNameList = []
     for fn in range(len(fileList)):
         labelName = fileList[fn].replace(dataRoot, '', 1)
-        labelName = labelName.replace('_nucleus_props_v2.csv', '')
+        labelName = labelName.replace('_nucleus_props.csv', '')
         imNameList.append(labelName)
 
     #filename = imNameList[0]
@@ -90,8 +90,8 @@ def segment_pec_fins(dataRoot):
     def load_nucleus_dataset(filename):
         #global fin_points_prev, not_fin_points_prev, class_predictions_curr, df, curationPath, propPath
 
-        propPath = dataRoot + filename + '_nucleus_props_v2.csv'
-        curationPath = dataRoot + filename + '_curation_info_v2/'
+        propPath = dataRoot + filename + '_nucleus_props.csv'
+        curationPath = dataRoot + filename + '_curation_info/'
 
         if not os.path.isdir(curationPath):
             os.mkdir(curationPath)
@@ -184,7 +184,8 @@ def segment_pec_fins(dataRoot):
                         html.Div([
                             dcc.Dropdown(imNameList, imNameList[0], id='dataset-dropdown'),
                             html.Div(id='dd-output-container', hidden=True)
-                        ])
+                        ],
+                        style={'width': '30%', 'display': 'inline-block'})
                         ]
                         )
 
@@ -441,14 +442,14 @@ def segment_pec_fins(dataRoot):
             class_predictions = class_predictions
             if len(class_predictions) == df.shape[0]:
                 df["pec_fin_flag"] = class_predictions
-            write_file = dataRoot + fileName + '_nucleus_props_v2.csv'
+            write_file = dataRoot + fileName + '_nucleus_props.csv'
             df.to_csv(write_file)
 
-            write_file2 = dataRoot + fileName + '_curation_info_v2/not_fin_points.pkl'
+            write_file2 = dataRoot + fileName + '_curation_info/not_fin_points.pkl'
             with open(write_file2, 'wb') as wf:
                 pickle.dump(not_fin_points, wf)
 
-            write_file3 = dataRoot + fileName + '_curation_info_v2/fin_points.pkl'
+            write_file3 = dataRoot + fileName + '_curation_info/fin_points.pkl'
             with open(write_file3, 'wb') as wf:
                 pickle.dump(fin_points, wf)
 
