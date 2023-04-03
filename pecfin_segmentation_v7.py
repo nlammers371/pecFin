@@ -19,6 +19,8 @@ from sklearn.neighbors import KDTree
 import pickle
 import os.path
 import os
+import networkx as nx
+
 from sklearn.preprocessing import PolynomialFeatures
 from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import RandomForestClassifier
@@ -26,11 +28,120 @@ from sklearn.metrics import classification_report, confusion_matrix
 import dash_daq as daq
 from itertools import product
 
+def calculate_distance_metrics(fin_tip_point, point_stat_raw, G):
+    if fin_tip_point:
+        cm_vec = [fin_tip_point[0]["x"], fin_tip_point[0]["y"], fin_tip_point[0]["z"]]
+    else:
+        cm_vec = np.mean(point_stat_raw.iloc[:, 0:3], axis=0)
+    print(cm_vec)
+    xyz_array_cm = point_stat_raw.iloc[:, 0:3] - cm_vec
+    # xyz_array_cm = xyz_array_cm - np.min(xyz_array_cm, axis=0)
+    # xyz_array_cm = np.divide(xyz_array_cm, np.max(xyz_array_cm))
+
+    # calculate higher-order position stats
+    xyz_df = pd.DataFrame(xyz_array_cm)
+    for i in product(xyz_df, xyz_df, repeat=1):
+        name = "*".join(i)
+        xyz_df[name] = xyz_df[list(i)].prod(axis=1)
+
+    xyz_df_norm = xyz_df.copy() - np.min(xyz_df.iloc[:], axis=0)
+    xyz_df_norm = np.divide(xyz_df_norm, np.max(xyz_df_norm.iloc[:], axis=0))
+    # Graph-based stuff
+    if fin_tip_point:
+        fin_tip_ind = fin_tip_point[0]["pointNumber"]
+    else:
+        fin_tip_ind = []
+    tip_dists = calculate_network_distances(fin_tip_ind, adjacency_graph)
+    print(xyz_df_norm.head())
+    # combine
+    point_stat_df = pd.concat((point_stat_raw.iloc[:, 3:], xyz_df_norm), axis=1)
+    point_stat_df["fin_tip_dists"] = tip_dists
+
+    return point_stat_df
+def calculate_network_distances(point, G):
+
+    dist_array = np.empty((len(G)))
+    if point:
+        graph_distances = nx.single_source_dijkstra_path_length(G, str(point))
+
+
+        for d in range(len(G)):
+            try:
+                dist_array[d] = graph_distances[str(d)]
+            except:
+                dist_array[d] = -1
+
+        max_dist = np.max(dist_array)
+        dist_array[np.where(dist_array==-1)[0]] = max_dist + 1
+    else:
+        dist_array[:] = 100
+
+    return dist_array
+def calculate_adjacency_graph(df):
+    k_nn = 5
+
+    # calculate KD tree and use this to determine k nearest neighbors for each point
+    xyz_array = df.iloc[:, 0:2]
+    tree = KDTree(xyz_array)
+
+    # get nn distances
+    nearest_dist, nearest_ind = tree.query(xyz_array, k=k_nn + 1)
+
+    # find average distance to kth closest neighbor
+    mean_nn_dist_vec = np.mean(nearest_dist, axis=0)
+    nn_thresh = mean_nn_dist_vec[k_nn]
+    # print(nn_thresh)
+
+    # iterate through points and build adjacency network
+    G = nx.Graph()
+
+    for n in range(xyz_array.shape[0]):
+        node_to = str(n)
+        nodes_from = [str(f) for f in nearest_ind[n, 1:]]
+        weights_from = [w for w in nearest_dist[n, 1:]]
+
+        # only allow edges that are within twice the average k_nn distance
+        allowed_edges = np.where(weights_from <= 2 * nn_thresh)[0]
+        for a in allowed_edges:
+            G.add_edge(node_to, nodes_from[a], weight=weights_from[a])
+
+    return G
+def calculate_point_cloud_stats(df):
+    ########################
+    # convert to point cloud
+    xyz_array = np.asarray(df[["X", "Y", "Z"]]).copy()
+    pcd = o3d.geometry.PointCloud()
+    pcd.points = o3d.utility.Vector3dVector(xyz_array)
+
+    # generate features to train classifier
+    cloud = PyntCloud.from_instance("open3d", pcd)
+
+    k_vec = [25, 101]
+
+    for k in range(len(k_vec)):
+        k_neighbors = cloud.get_neighbors(k=k_vec[k])
+
+        ev = cloud.add_scalar_field("eigen_values", k_neighbors=k_neighbors)
+        cloud.add_scalar_field("eigen_decomposition", k_neighbors=k_neighbors)
+
+        cloud.add_scalar_field("curvature", ev=ev)
+        cloud.add_scalar_field("anisotropy", ev=ev)
+        cloud.add_scalar_field("eigenentropy", ev=ev)
+        cloud.add_scalar_field("eigen_sum", ev=ev)
+        cloud.add_scalar_field("linearity", ev=ev)
+        cloud.add_scalar_field("omnivariance", ev=ev)
+        cloud.add_scalar_field("planarity", ev=ev)
+        cloud.add_scalar_field("sphericity", ev=ev)
+
+    point_stat_raw = cloud.points
+
+    return point_stat_raw.iloc[:, 0:3]
+
 
 def logistic_regression(features_train, features_all, fin_class, model=None):
 
     if model == None:
-        model = RandomForestClassifier(random_state=0, class_weight='balanced')
+        model = RandomForestClassifier(random_state=0)#, class_weight='balanced')
     model.fit(features_train, fin_class.ravel())
     predictions = model.predict(features_all)
 
@@ -96,83 +207,63 @@ def segment_pec_fins(dataRoot):
         fin_points_prev = []
         other_points_prev = []
         class_predictions_curr = []
+        fin_tip_prev = []
 
         # load key info from previous session
         base_path = curationPath + 'base_points.pkl'
         other_path = curationPath + 'other_points.pkl'
         fin_path = curationPath + 'fin_points.pkl'
+        fin_tip_path = curationPath + 'fin_tip_point.pkl'
+
         if os.path.isfile(base_path):
             with open(base_path, 'rb') as fn:
                 base_points_prev = pickle.load(fn)
             base_points_prev = json.loads(base_points_prev)
 
+        if os.path.isfile(other_path):
             with open(other_path, 'rb') as fn:
                 other_points_prev = pickle.load(fn)
             other_points_prev = json.loads(other_points_prev)
 
+        if os.path.isfile(fin_path):
             with open(fin_path, 'rb') as fn:
                 fin_points_prev = pickle.load(fn)
             fin_points_prev = json.loads(fin_points_prev)
+
+        if os.path.isfile(fin_tip_path):
+            with open(fin_path, 'rb') as fn:
+                fin_tip_prev = pickle.load(fn)
+            fin_tip_prev = json.loads(fin_tip_prev)
 
         if 'pec_fin_flag' in df:
             class_predictions_curr = df['pec_fin_flag']
 
         return {"df": df, "class_predictions_curr": class_predictions_curr, "fin_points_prev": fin_points_prev,
-                "base_points_prev": base_points_prev, "other_points_prev": base_points_prev, "propPath": propPath,
-                "curationPath": curationPath, "model_data": model_data, "model": model}
+                "base_points_prev": base_points_prev, "other_points_prev": other_points_prev, "propPath": propPath,
+                "fin_tip_prev": fin_tip_prev, "curationPath": curationPath, "model_data": model_data, "model": model}
 
     df_dict = load_nucleus_dataset(imNameList[0])
 
-    global df, base_points_prev, fin_points_prev, class_predictions_curr, model, model_data
+    global df, base_points_prev, fin_points_prev, class_predictions_curr, model, model_data, adjacency_graph, point_stat_raw
     df = df_dict["df"]
     base_points_prev = df_dict["base_points_prev"]
     fin_points_prev = df_dict["fin_points_prev"]
+    fin_tip_prev = df_dict["fin_tip_prev"]
     class_predictions_curr = df_dict["class_predictions_curr"]
     model = df_dict["model"]
     model_data = df_dict["model_data"]
 
-    ########################
-    # convert to point cloud
-    xyz_array = np.asarray(df[["X", "Y", "Z"]]).copy()
-    pcd = o3d.geometry.PointCloud()
-    pcd.points = o3d.utility.Vector3dVector(xyz_array)
+    ################
+    # calculate point cloud stats
+    point_stat_raw = calculate_point_cloud_stats(df)
 
-    # generate features to train classifier
-    cloud = PyntCloud.from_instance("open3d", pcd)
-
-    k_vec = [25, 50, 101]
-
-    for k in range(len(k_vec)):
-        k_neighbors = cloud.get_neighbors(k=k_vec[k])
-
-        ev = cloud.add_scalar_field("eigen_values", k_neighbors=k_neighbors)
-        cloud.add_scalar_field("eigen_decomposition", k_neighbors=k_neighbors)
-
-        cloud.add_scalar_field("curvature", ev=ev)
-        cloud.add_scalar_field("anisotropy", ev=ev)
-        cloud.add_scalar_field("eigenentropy", ev=ev)
-        cloud.add_scalar_field("eigen_sum", ev=ev)
-        cloud.add_scalar_field("linearity", ev=ev)
-        cloud.add_scalar_field("omnivariance", ev=ev)
-        cloud.add_scalar_field("planarity", ev=ev)
-        cloud.add_scalar_field("sphericity", ev=ev)
-
-    point_stat_raw = cloud.points
+    ################
+    # calculate network-based stats
+    adjacency_graph = calculate_adjacency_graph(df)
 
     # calculate center of mass
-    cm_vec = np.mean(point_stat_raw.iloc[:, 0:2], axis=0)
-    xyz_array_cm = point_stat_raw.iloc[:, 0:2] - cm_vec
-    xyz_array_cm = xyz_array_cm - np.min(xyz_array_cm, axis=0)
-    xyz_array_cm = np.divide(xyz_array_cm, np.max(xyz_array_cm))
-
-    # calculate higher-order position stats
-    xyz_df = pd.DataFrame(xyz_array_cm)
-    for i in product(xyz_df, xyz_df, repeat=3):
-        name = "*".join(i)
-        xyz_df[name] = xyz_df[list(i)].prod(axis=1)
-
-    # combine with prev df
-    point_stat_df = pd.concat([xyz_df, point_stat_raw.iloc[:, 3:]], axis=1)
+    # point_stat_df = calculate_distance_metrics(fin_tip_prev, point_stat_raw, adjacency_graph)
+    ####
 
     ########################
     # App
@@ -198,6 +289,7 @@ def segment_pec_fins(dataRoot):
                         html.Div(id='other_points', hidden=True),
                         html.Div(id='base_points', hidden=True),
                         html.Div(id='fin_points', hidden=True),
+                        html.Div(id='fin_tip_point', hidden=True),
                         html.Div(id='pfin_nuclei', hidden=True),
                       
                         html.Div([
@@ -206,25 +298,12 @@ def segment_pec_fins(dataRoot):
                         ],
                             style={'width': '30%', 'display': 'inline-block'}),
                         html.Div([
-                            dcc.Dropdown(["Pec Fin", "Base Surface", "Other"], "Pec Fin", id='class-dropdown'),
+                            dcc.Dropdown(["Fin Tip", "Pec Fin", "Base Surface", "Other"], "Fin Tip", id='class-dropdown'),
                             html.Div(id='class-output-container', hidden=True)
                         ],
                             style={'width': '30%', 'display': 'inline-block'})
                         ]
                         )
-
-    # @app.callback(
-    #     Output('my-toggle-switch-output', 'children'),
-    #     Input('class-toggle-switch', 'value'))
-    # def update_output(value):
-    #     value = json.dumps(value)
-    #     toggle_val = value == "true"
-    #     if toggle_val:
-    #         toggle_string = "Pec Fin"
-    #     else:
-    #         toggle_string = "Non-Pec Fin"
-    #     return f'Click to select {toggle_string} points.'
-
 
     @app.callback(
         Output('dd-output-container', 'children'),
@@ -244,17 +323,19 @@ def segment_pec_fins(dataRoot):
 
     @app.callback([Output('base_points', 'children'),
                    Output('other_points', 'children'),
-                   Output('fin_points', 'children')],
+                   Output('fin_points', 'children'),
+                   Output('fin_tip_point', 'children')],
                     [Input('3d_scat', 'clickData'),
                      Input('clear', 'n_clicks'),
                      Input('class-output-container', 'children'),
                      Input('dd-output-container', 'children')],
                     [State('base_points', 'children'),
                      State('other_points', 'children'),
-                     State('fin_points', 'children')
+                     State('fin_points', 'children'),
+                     State('fin_tip_point', 'children')
                      ])
 
-    def select_point(clickData, n_clicks, class_val, fileName, base_points, other_points, fin_points):
+    def select_point(clickData, n_clicks, class_val, fileName, base_points, other_points, fin_points, fin_tip_point):
         ctx = dash.callback_context
         ids = [c['prop_id'] for c in ctx.triggered]
         changed_id = [p['prop_id'] for p in dash.callback_context.triggered][0]
@@ -265,6 +346,7 @@ def segment_pec_fins(dataRoot):
         base_points_prev = df_dict["base_points_prev"]
         fin_points_prev = df_dict["fin_points_prev"]
         other_points_prev = df_dict["other_points_prev"]
+        fin_tip_prev = df_dict["fin_tip_prev"]
 
         if base_points and ('dd-output-container' not in changed_id):
             base_results = json.loads(base_points)
@@ -281,7 +363,12 @@ def segment_pec_fins(dataRoot):
         else:
             fin_results = []
 
-        global init_toggle
+        if fin_tip_point:
+            fin_tip_point = json.loads(fin_tip_point)
+        else:
+            fin_tip_point = fin_tip_prev
+
+        global init_toggle # NL: does this do anything?
 
         if ('dd-output-container' in changed_id) | init_toggle:
             if len(base_points_prev) > 0:
@@ -298,6 +385,7 @@ def segment_pec_fins(dataRoot):
                 for p in other_points_prev:
                     if p not in other_results:
                         other_results.append(p)
+
 
 
         if '3d_scat.clickData' in ids:
@@ -325,7 +413,7 @@ def segment_pec_fins(dataRoot):
                         rm_ind = np.where(xyz_f == xyz_p)
                         fin_results.pop(rm_ind[0][0])
 
-            else:
+            elif class_val == "Other":
                 xyz_o = np.round([[other_results[i]["x"], other_results[i]["y"], other_results[i]["z"]] for i in range(len(
                     other_results))], 3)
                 for p in clickData['points']:
@@ -337,17 +425,22 @@ def segment_pec_fins(dataRoot):
                         rm_ind = np.where(xyz_o == xyz_p)
                         other_results.pop(rm_ind[0][0])
 
+            elif class_val == "Fin Tip":
+                fin_tip_point = clickData['points']
+
         if ('clear' in changed_id):
             base_results = []
             fin_results = []
             other_results = []
+            fin_tip_point = []
 
         base_results = json.dumps(base_results)
         fin_results = json.dumps(fin_results)
         other_results = json.dumps(other_results)
+        fin_tip_point = json.dumps(fin_tip_point)
 
         init_toggle = False
-        return base_results, other_results, fin_results
+        return base_results, other_results, fin_results, fin_tip_point
 
     @app.callback([Output('3d_scat', 'figure'),
                    Output('pfin_nuclei', 'children')],
@@ -355,10 +448,11 @@ def segment_pec_fins(dataRoot):
                  Input('base_points', 'children'),
                  Input('other_points', 'children'),
                  Input('fin_points', 'children'),
+                 Input('fin_tip_point', 'children'),
                  Input('calc-button', 'n_clicks'),
                  Input('dd-output-container', 'children')])
 
-    def chart_3d(class_predictions_in, base_points, other_points, fin_points, n_clicks, fileName):
+    def chart_3d(class_predictions_in, base_points, other_points, fin_points, fin_tip_point, n_clicks, fileName):
 
         global f
 
@@ -376,7 +470,26 @@ def segment_pec_fins(dataRoot):
         base_points = json.loads(base_points) if base_points else []
         fin_points = json.loads(fin_points) if fin_points else []
         other_points = json.loads(other_points) if other_points else []
-
+        fin_tip_point = json.loads(fin_tip_point) if fin_tip_point else []
+        # print(fin_tip_point)
+        if fin_tip_point:
+            f.add_trace(
+                go.Scatter3d(
+                    mode='markers',
+                    x=[p['x'] for p in fin_tip_point],
+                    y=[p['y'] for p in fin_tip_point],
+                    z=[p['z'] for p in fin_tip_point],
+                    marker=dict(
+                        color='black',
+                        size=8,
+                        line=dict(
+                            color='black',
+                            width=4
+                        )
+                    ),
+                    showlegend=False
+                )
+            )
         if base_points:
             f.add_trace(
                 go.Scatter3d(
@@ -436,7 +549,17 @@ def segment_pec_fins(dataRoot):
 
         # global class_predictions_curr
         if 'calc-button' in changed_id:
-            if base_points and fin_points:
+            if base_points and fin_points and other_points:
+                # update feature data frame with distance to fin tip (if it is specified)
+                # if fin_tip_point:
+                #     fin_tip_ind = fin_tip_point[0]["pointNumber"]
+                # else:
+                #     fin_tip_ind = []
+                # tip_dists = calculate_network_distances(fin_tip_ind, adjacency_graph)
+                # point_stat_df["fin_tip_dists"] = tip_dists
+
+                point_stat_df = calculate_distance_metrics(fin_tip_point, point_stat_raw, adjacency_graph)
+
                 # generate class vec
                 fin_class_vec = np.zeros((len(base_points) + len(other_points) + len(fin_points), 1))
                 fin_class_vec[len(base_points):, 0] = 1
