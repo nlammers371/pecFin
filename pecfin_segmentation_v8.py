@@ -12,6 +12,7 @@ import pandas as pd
 import numpy as np
 import json
 import glob2 as glob
+from sklearn.decomposition import PCA
 from skimage.measure import regionprops
 import itertools
 from scipy.spatial import distance_matrix
@@ -20,6 +21,8 @@ import pickle
 import os.path
 import os
 import networkx as nx
+import math
+import scipy
 from astropy.coordinates import cartesian_to_spherical
 
 from sklearn.preprocessing import PolynomialFeatures
@@ -36,6 +39,51 @@ def cart_to_sphere(xyz):
     ptsnew[:, 1] = np.arctan2(np.sqrt(xy), xyz[:, 2]) # for elevation angle defined from Z-axis down
     ptsnew[:, 2] = np.arctan2(xyz[:, 1], xyz[:, 0])
     return ptsnew
+
+def sphereFit(spX,spY,spZ):
+    #   Assemble the A matrix
+    spX = np.array(spX)
+    spY = np.array(spY)
+    spZ = np.array(spZ)
+    A = np.zeros((len(spX),4))
+    A[:,0] = spX*2
+    A[:,1] = spY*2
+    A[:,2] = spZ*2
+    A[:,3] = 1
+
+    #   Assemble the f matrix
+    f = np.zeros((len(spX),1))
+    f[:,0] = (spX*spX) + (spY*spY) + (spZ*spZ)
+    C, residules, rank, singval = np.linalg.lstsq(A,f)
+
+    #   solve for the radius
+    t = (C[0]*C[0])+(C[1]*C[1])+(C[2]*C[2])+C[3]
+    radius = math.sqrt(t)
+
+    return radius, C[0], C[1], C[2]
+
+def sphereFit_fixed_r(spX,spY,spZ,r0):
+    #   Assemble the A matrix
+    spX = np.array(spX)
+    spY = np.array(spY)
+    spZ = np.array(spZ)
+
+    xyz_array = np.zeros((len(spX), 3))
+    xyz_array[:, 0] = spX
+    xyz_array[:, 1] = spY
+    xyz_array[:, 2] = spZ
+    c0 = np.mean(xyz_array, axis=0)
+    c0[2] = -250
+    def ob_fun(c0, xyz=xyz_array, r=r0):
+        res = np.sqrt((xyz[:, 0]-c0[0])**2 + (xyz[:, 1]-c0[1])**2 + (xyz[:, 2]-c0[2])**2) - r
+        return res
+
+    C = scipy.optimize.least_squares(ob_fun, c0, bounds=([-np.inf, -np.inf, -np.inf], [np.inf, np.inf, 0]))
+    #   solve for the radius
+    # t = (C[0]*C[0])+(C[1]*C[1])+(C[2]*C[2])+C[3]
+    # radius = math.sqrt(t)
+    # print(C)
+    return r0, C.x[0], C.x[1], C.x[2]
 
 def calculate_distance_metrics(fin_tip_point, point_stat_raw, AG):
     if fin_tip_point:
@@ -278,6 +326,8 @@ def segment_pec_fins(dataRoot):
     class_predictions_curr = df_dict["class_predictions_curr"]
 
     ####
+    # set plot boundaries
+
 
     ########################
     # App
@@ -285,10 +335,28 @@ def segment_pec_fins(dataRoot):
     global init_toggle
     init_toggle = True
     def create_figure(df):
+        # calculate axis limits
+        xmin = np.min(df["X"].iloc[:]) + 5
+        xmax = np.max(df["X"].iloc[:]) - 5
+
+        ymin = np.min(df["Y"].iloc[:]) - 5
+        ymax = np.max(df["Y"].iloc[:]) + 5
+
+        zmin = np.min(df["Z"].iloc[:]) - 3
+        zmax = np.max(df["Z"].iloc[:]) + 3
+
         r_vec = np.sqrt(df["X"]**2 + df["Y"]**2 + df["Z"]**2)
         fig = px.scatter_3d(df, x="X", y="Y", z="Z", opacity=0.4, color=r_vec, color_continuous_scale='ice')
         fig.update_traces(marker=dict(size=6))
         fig.update_layout(coloraxis_showscale=False)
+
+        fig.update_layout(
+            scene=dict(
+                xaxis=dict(range=[xmin, xmax], ),
+                yaxis=dict(range=[ymin, ymax], ),
+                zaxis=dict(range=[zmin, zmax], ),
+                aspectratio=dict(x=1, y=1, z=0.5)))
+
         return fig
 
     f = create_figure(df)
@@ -479,6 +547,16 @@ def segment_pec_fins(dataRoot):
         df_dict = load_nucleus_dataset(fileName)
         df = df_dict["df"]
 
+        # calculate axis limits
+        xmin = np.min(df["X"].iloc[:]) + 5
+        xmax = np.max(df["X"].iloc[:]) - 5
+
+        ymin = np.min(df["Y"].iloc[:]) - 5
+        ymax = np.max(df["Y"].iloc[:]) + 5
+
+        zmin = np.min(df["Z"].iloc[:]) - 3
+        zmax = np.max(df["Z"].iloc[:]) + 3
+
         class_predictions_curr = df_dict["class_predictions_curr"]
 
         f = create_figure(df)
@@ -578,7 +656,6 @@ def segment_pec_fins(dataRoot):
                 for fn, fp in enumerate(fin_points):
                     xyz_click[fn+len(other_points)+len(base_points), :] = np.round([fp["x"], fp["y"], fp["z"]], 3)
 
-
                 dist_mat = distance_matrix(xyz_click, np.asarray(df[["X", "Y", "Z"]]))
                 lb_indices = np.argmin(dist_mat, axis=1)
 
@@ -596,44 +673,13 @@ def segment_pec_fins(dataRoot):
                 fin_class_vec[len(other_points):, 0] = 1  # base=1
                 fin_class_vec[len(base_points) + len(other_points):, 0] = 2  # fin=2
 
-                # extract features for labeled subset
-                # fin_indices = [f["pointNumber"] for f in fin_points]
-                # base_indices = [n["pointNumber"] for n in base_points]
-                # other_indices = [n["pointNumber"] for n in other_points]
-                # lb_indices = np.concatenate((other_indices, base_indices, fin_indices), axis=0)
-
-                # df_lb = np.reshape(point_stat_df.iloc[lb_indices], (len(lb_indices), 1))
                 df_lb = point_stat_df.iloc[lb_indices]
-
-                # df_lb = np.asarray(df_lb)
-                # df_lb = np.reshape(df_lb, (df_lb.size, 1))
-
-                df_lb_show = np.concatenate((df_lb, fin_class_vec), axis=1)
-                # print(df_lb)
-                # point_stat_df = np.asarray(point_stat_df)
-                # point_stat_df = np.reshape(point_stat_df, (point_stat_df.size, 1))
 
                 class_predictions, model = logistic_regression(df_lb, point_stat_df, fin_class_vec)
 
-                # f = px.scatter_3d(x=df["X"], y=df["Y"], z=df["Z"],color=point_stat_df["fin_tip_dists"], opacity=0.5)
-                # f = px.scatter_3d(x=df["X"], y=df["Y"], z=df["Y"], opacity=0.5)
-                # f.add_trace(
-                #     go.Scatter3d(
-                #         mode='markers',
-                #         x=point_stat_df["x"],
-                #         y=point_stat_df["y"],
-                #         z=point_stat_df["z"],
-                #         marker=dict(
-                #             color=point_stat_df["fin_tip_dists"],
-                #             opacity=0.5,
-                #             size=5),
-                #         showlegend=False
-                #     )
-                # )
-                # print(point_stat_df.head(4))
-                # print(df[["X", "Y", "Z"]].iloc[0:5])
             else:
                 class_predictions = np.zeros((df.shape[0],))
+
         elif (class_predictions_in != None) and ('dd-output-container' not in changed_id):
             class_predictions = class_predictions_in
         else:
@@ -642,6 +688,81 @@ def segment_pec_fins(dataRoot):
         pec_fin_nuclei = np.where(np.asarray(class_predictions) == 2)[0]
         base_nuclei = np.where(np.asarray(class_predictions) == 1)[0]
         other_nuclei = np.where(np.asarray(class_predictions) == 0)[0]
+
+        if (len(base_nuclei) > 0) and (len(pec_fin_nuclei) > 0):
+            # fit sphere
+            xyz_base = df[["X", "Y", "Z"]].iloc[base_nuclei]
+            xyz_base = xyz_base.to_numpy()
+            # print(xyz_base)
+            r, x0, y0, z0 = sphereFit_fixed_r(xyz_base[:, 0], xyz_base[:, 1], xyz_base[:, 2], 250)
+            u, v = np.mgrid[0:2 * np.pi:200j, 0:np.pi:100j]
+            x = np.cos(u) * np.sin(v) * r
+            y = np.sin(u) * np.sin(v) * r
+            z = np.cos(v) * r
+            x_sphere = x + x0
+            y_sphere = y + y0
+            z_sphere = z + z0
+
+            # add sphere to plot
+            f.add_trace(go.Surface(x=x_sphere, y=y_sphere, z=z_sphere, opacity=0.5))
+
+            f.update_layout(
+                scene=dict(
+                    xaxis=dict(range=[xmin, xmax], ),
+                    yaxis=dict(range=[ymin, ymax], ),
+                    zaxis=dict(range=[zmin, zmax], ),
+                   aspectratio=dict(x=1, y=1, z=0.5)))
+
+            # fit corresponding plane
+            # get nn distances
+            k_nn = 5
+            xyz_array = df[["X", "Y", "Z"]].to_numpy()
+            tree = KDTree(xyz_array)
+            nearest_dist, nearest_ind = tree.query(xyz_array, k=k_nn + 1)
+
+            # find average distance to kth closest neighbor
+            mean_nn_dist_vec = np.mean(nearest_dist, axis=0)
+            nn_thresh = mean_nn_dist_vec[k_nn]
+
+            # find pec fin nuclei that are near the sphere surface
+            xyz_fin = df[["X", "Y", "Z"]].iloc[pec_fin_nuclei].to_numpy()
+            c0 = np.asarray([x0, y0, z0])
+            dist_array = np.abs(np.sqrt(np.sum((c0-xyz_fin)**2, axis=1)) - r)
+            surf_indices = np.where(dist_array <= nn_thresh)[0]
+            xyz_surf = xyz_fin[surf_indices]
+            # f.add_trace(go.Scatter3d(x=xyz_surf[:, 0], y=xyz_surf[:, 1], z=xyz_surf[:, 2], mode='markers'))
+
+            # calculate centroid
+            surf_cm = np.mean(xyz_surf, axis=0)
+
+            # calculate PCA
+            pca = PCA(n_components=3)
+            # xyz_grid = np.concatenate((xyz_surf[:, 0], xyz_surf[:, 1], xyz_surf[:, 2), axis=1)
+            pca.fit(xyz_surf)
+            vec1 = pca.components_[0]
+            vec2 = surf_cm - c0
+            vec2 = vec2 / np.sqrt(np.sum(vec2**2))
+            plane_normal = np.cross(vec1, vec2)
+            plane_normal_u = plane_normal / np.sqrt(np.sum(plane_normal**2))
+            D_plane = -np.dot(plane_normal, surf_cm)
+
+            # get predicted surface
+            grid_res = 100
+            X, Y = np.meshgrid(np.linspace(np.min(xyz_array[:, 0]), np.max(xyz_array[:, 0]), grid_res),
+                               np.linspace(np.min(xyz_array[:, 1]), np.max(xyz_array[:, 1]), grid_res))
+
+            # predict z points
+            Z_pd = -(plane_normal_u[0] * X + plane_normal_u[1] * Y + D_plane) / plane_normal_u[2]
+
+            f.add_trace(go.Surface(x=X, y=Y, z=Z_pd, opacity=1))
+            f.update_layout(
+                scene=dict(
+                    xaxis=dict(range=[xmin, xmax], ),
+                    yaxis=dict(range=[ymin, ymax], ),
+                    zaxis=dict(range=[zmin, zmax], ),
+                    aspectratio=dict(x=1, y=1, z=0.5)))
+            # transform all fin points
+            pca_array_full = pca.transform(xyz_array)
 
         ################
         # Plot predictions
