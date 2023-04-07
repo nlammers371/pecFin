@@ -7,12 +7,16 @@ from pyntcloud import PyntCloud
 import open3d as o3d
 from ome_zarr.io import parse_url
 from ome_zarr.reader import Reader
+import alphashape
 import plotly.graph_objs as go
 import pandas as pd
 import numpy as np
 import json
 import glob2 as glob
 from sklearn.decomposition import PCA
+import open3d as o3d
+from pyntcloud import PyntCloud
+from sklearn.cluster import KMeans
 from skimage.measure import regionprops
 import itertools
 from scipy.spatial import distance_matrix
@@ -32,6 +36,50 @@ from sklearn.metrics import classification_report, confusion_matrix
 import dash_daq as daq
 from itertools import product
 
+def fit_plane_prior(df, c0, pec_fin_nuclei, r):
+    # fit corresponding plane
+    # get nn distances
+    k_nn = 7
+    xyz_array = df[["X", "Y", "Z"]].to_numpy()
+    tree = KDTree(xyz_array)
+    nearest_dist, nearest_ind = tree.query(xyz_array, k=k_nn + 1)
+
+    # find average distance to kth closest neighbor
+    mean_nn_dist_vec = np.mean(nearest_dist, axis=0)
+    nn_thresh = mean_nn_dist_vec[k_nn]
+
+    # find pec fin nuclei that are near the sphere surface
+    xyz_fin = df[["X", "Y", "Z"]].iloc[pec_fin_nuclei].to_numpy()
+    dist_array = np.sqrt(np.sum((c0 - xyz_fin) ** 2, axis=1)) - r
+    surf_indices = np.where(dist_array <= nn_thresh)[0]
+    xyz_surf = xyz_fin[surf_indices]
+
+    # f.add_trace(go.Scatter3d(x=xyz_surf[:, 0], y=xyz_surf[:, 1], z=xyz_surf[:, 2], mode='markers'))
+
+    # calculate centroid
+    surf_cm = np.mean(xyz_surf, axis=0)
+
+    # calculate PCA
+    pca = PCA(n_components=3)
+
+    # xyz_grid = np.concatenate((xyz_surf[:, 0], xyz_surf[:, 1], xyz_surf[:, 2), axis=1)
+    pca.fit(xyz_surf)
+    vec1 = pca.components_[0]
+    vec2 = surf_cm - c0
+    vec2 = vec2 / np.sqrt(np.sum(vec2 ** 2))
+    plane_normal = np.cross(vec1, vec2)
+    plane_normal_u = plane_normal / np.sqrt(np.sum(plane_normal ** 2))
+    D_plane = -np.dot(plane_normal, surf_cm)
+
+    # get predicted surface
+    grid_res = 100
+    X, Y = np.meshgrid(np.linspace(np.min(xyz_array[:, 0]), np.max(xyz_array[:, 0]), grid_res),
+                       np.linspace(np.min(xyz_array[:, 1]), np.max(xyz_array[:, 1]), grid_res))
+
+    # predict z points
+    Z_pd = -(plane_normal_u[0] * X + plane_normal_u[1] * Y + D_plane) / plane_normal_u[2]
+
+    return X, Y, Z_pd, surf_indices, plane_normal_u, D_plane, nn_thresh, surf_cm
 def cart_to_sphere(xyz):
     ptsnew = np.zeros(xyz.shape)
     xy = xyz[:, 0]**2 + xyz[:, 1]**2
@@ -349,7 +397,7 @@ def segment_pec_fins(dataRoot):
         fig = px.scatter_3d(df, x="X", y="Y", z="Z", opacity=0.4, color=r_vec, color_continuous_scale='ice')
         fig.update_traces(marker=dict(size=6))
         fig.update_layout(coloraxis_showscale=False)
-
+        # fig.update_coloraxes(showscale=False)
         fig.update_layout(
             scene=dict(
                 xaxis=dict(range=[xmin, xmax], ),
@@ -704,109 +752,236 @@ def segment_pec_fins(dataRoot):
             z_sphere = z + z0
 
             # add sphere to plot
-            f.add_trace(go.Surface(x=x_sphere, y=y_sphere, z=z_sphere, opacity=0.5))
+            # f.add_trace(go.Surface(x=x_sphere, y=y_sphere, z=z_sphere, opacity=0.5, showscale=False))
 
-            f.update_layout(
-                scene=dict(
-                    xaxis=dict(range=[xmin, xmax], ),
-                    yaxis=dict(range=[ymin, ymax], ),
-                    zaxis=dict(range=[zmin, zmax], ),
-                   aspectratio=dict(x=1, y=1, z=0.5)))
-
-            # fit corresponding plane
-            # get nn distances
-            k_nn = 5
-            xyz_array = df[["X", "Y", "Z"]].to_numpy()
-            tree = KDTree(xyz_array)
-            nearest_dist, nearest_ind = tree.query(xyz_array, k=k_nn + 1)
-
-            # find average distance to kth closest neighbor
-            mean_nn_dist_vec = np.mean(nearest_dist, axis=0)
-            nn_thresh = mean_nn_dist_vec[k_nn]
-
-            # find pec fin nuclei that are near the sphere surface
-            xyz_fin = df[["X", "Y", "Z"]].iloc[pec_fin_nuclei].to_numpy()
             c0 = np.asarray([x0, y0, z0])
-            dist_array = np.abs(np.sqrt(np.sum((c0-xyz_fin)**2, axis=1)) - r)
-            surf_indices = np.where(dist_array <= nn_thresh)[0]
-            xyz_surf = xyz_fin[surf_indices]
-            # f.add_trace(go.Scatter3d(x=xyz_surf[:, 0], y=xyz_surf[:, 1], z=xyz_surf[:, 2], mode='markers'))
 
-            # calculate centroid
-            surf_cm = np.mean(xyz_surf, axis=0)
+            X, Y, Z, surf_indices, plane_normal_u, D_plane, nn_thresh, surf_cm = fit_plane_prior(df, c0, pec_fin_nuclei, r)
 
-            # calculate PCA
-            pca = PCA(n_components=3)
-            # xyz_grid = np.concatenate((xyz_surf[:, 0], xyz_surf[:, 1], xyz_surf[:, 2), axis=1)
-            pca.fit(xyz_surf)
-            vec1 = pca.components_[0]
-            vec2 = surf_cm - c0
-            vec2 = vec2 / np.sqrt(np.sum(vec2**2))
-            plane_normal = np.cross(vec1, vec2)
-            plane_normal_u = plane_normal / np.sqrt(np.sum(plane_normal**2))
-            D_plane = -np.dot(plane_normal, surf_cm)
-
-            # get predicted surface
-            grid_res = 100
-            X, Y = np.meshgrid(np.linspace(np.min(xyz_array[:, 0]), np.max(xyz_array[:, 0]), grid_res),
-                               np.linspace(np.min(xyz_array[:, 1]), np.max(xyz_array[:, 1]), grid_res))
-
-            # predict z points
-            Z_pd = -(plane_normal_u[0] * X + plane_normal_u[1] * Y + D_plane) / plane_normal_u[2]
-
-            f.add_trace(go.Surface(x=X, y=Y, z=Z_pd, opacity=1))
+            f.add_trace(go.Surface(x=X, y=Y, z=Z, opacity=1, showscale=False))
             f.update_layout(
                 scene=dict(
                     xaxis=dict(range=[xmin, xmax], ),
                     yaxis=dict(range=[ymin, ymax], ),
                     zaxis=dict(range=[zmin, zmax], ),
                     aspectratio=dict(x=1, y=1, z=0.5)))
-            # transform all fin points
-            pca_array_full = pca.transform(xyz_array)
 
+            #######################
+            # fit surface to fin points
+            #######################
+            xyz_fin = df[["X", "Y", "Z"]].iloc[pec_fin_nuclei]
+            xyz_surf = xyz_fin.iloc[surf_indices].to_numpy()
+
+            # exclude base points that are too far from our plane prior. If included, these will tend to cause the
+            # surface fit to perform poorly
+            d_surf = np.abs(np.sum(np.multiply(plane_normal_u, xyz_surf), axis=1) + D_plane)
+            ind_rm = surf_indices[np.where(d_surf > nn_thresh)[0]]
+            keep_indices = [k for k in range(xyz_fin.shape[0]) if k not in ind_rm]
+            xyz_fin_filt = xyz_fin.iloc[keep_indices].copy()
+
+            # convert to point cloud and downsample points
+            tree = KDTree(xyz_fin_filt.to_numpy())
+            nearest_dist, nearest_ind = tree.query(xyz_fin_filt.to_numpy(), k=2)
+
+            # find average distance to kth closest neighbor
+            mean_nn_dist_vec = np.mean(nearest_dist, axis=0)
+            nn_thresh1 = mean_nn_dist_vec[1]
+
+            pcd = o3d.geometry.PointCloud()
+            pcd.points = o3d.utility.Vector3dVector(xyz_fin_filt.to_numpy())
+            pcd_down = pcd.voxel_down_sample(voxel_size=nn_thresh1*1.5)
+            xyz_fin_down = np.asarray(pcd_down.points)
+
+            # f = px.scatter_3d(x=xyz_fin_down[:, 0], y=xyz_fin_down[:, 1], z=xyz_fin_down[:, 2])
+
+            # Transform to PCA space
+            pca = PCA(n_components=3)
+            pca.fit(xyz_fin_down)
+            pca_fin_raw = pca.transform(xyz_fin_down)
+
+            # use kmeans to find key points
+            n_clusters = 100
+            kmeans = KMeans(n_clusters=n_clusters).fit(pca_fin_raw[:, 0:2])
+            k_labels = kmeans.labels_
+            pca_fin = np.empty((n_clusters, 3))
+            for n in range(n_clusters):
+                k_indices = np.where(k_labels == n)[0]
+                pca_fin[n, :] = np.mean(pca_fin_raw[k_indices, :], axis=0)
+            # pca_fin = kmeans.cluster_centers_
+
+            pca_surf_cm = pca.transform(np.reshape(surf_cm, (1, 3)))
+            pca_surf_cm = pca_surf_cm.ravel()
+            # print(pca_surf_cm)
+            # generate grid to be used for surface generation
+            grid_res = 100
+            P0, P1 = np.meshgrid(np.linspace(np.min(pca_fin_raw[:, 0]), np.max(pca_fin_raw[:, 0]), grid_res),
+                                 np.linspace(np.min(pca_fin_raw[:, 1]), np.max(pca_fin_raw[:, 1]), grid_res))
+
+            PP0 = P0.flatten()
+            PP1 = P1.flatten()
+
+            # fit quadratic surface, just for kicks
+            A = np.c_[
+                np.ones(pca_fin.shape[0]), pca_fin[:, :2], np.prod(pca_fin[:, :2], axis=1), pca_fin[:, :2] ** 2]
+            A2 = np.c_[np.ones(PP0.shape), PP0, PP1, PP0 * PP1, PP0 ** 2, PP1 ** 2]
+            # C_orig, _, _, _ = scipy.linalg.lstsq(A, pca_fin[:, 2])
+
+            # attempt to write custom loss function that replicates this fit
+            def l2_fit_loss(C_prop, A=A, pp2=pca_fin[:, 2].ravel()):
+                surf_pd = np.dot(A, C_prop).ravel()
+                residuals = surf_pd - pp2
+                return residuals
+
+            # now try for a more constrained version
+            def solve_for_f(C_fit, cp):
+                # C0 = z0 - C1*x0 - C2*y0 - C3*x0*yz - C4*x0**2 - C5*Y0**2
+                x0 = cp[0]
+                y0 = cp[1]
+                z0 = cp[2]
+                C0 = z0 - C_fit[0]*x0 - C_fit[1]*y0 - C_fit[2]*x0*y0 - C_fit[3]*x0**2 - C_fit[4]*y0**2
+                C_out = [C0, C_fit[0], C_fit[1], C_fit[2], C_fit[3], C_fit[4]]
+                return C_out
+
+            def l2_fit_loss_point(C_prop, A=A, pp2=pca_fin[:, 2].ravel(), cp=pca_surf_cm):
+                C_full = solve_for_f(C_prop, cp)
+                surf_pd = np.dot(A, C_full).ravel()
+                residuals = surf_pd - pp2
+                return residuals
+
+            # calculate weights
+            cloud = PyntCloud.from_instance("open3d", pcd)
+            k_neighbors = cloud.get_neighbors(k=100)
+            ev = cloud.add_scalar_field("eigen_values", k_neighbors=k_neighbors)
+            cloud.add_scalar_field("linearity", ev=ev)
+            wt_vec = cloud.points["linearity(101)"].to_numpy()
+            def l2_fit_loss_point_wt(C_prop, A=A, pp2=pca_fin[:, 2].ravel(), cp=pca_surf_cm, weights=wt_vec):
+                C_full = solve_for_f(C_prop, cp)
+                surf_pd = np.dot(A, C_full).ravel()
+                residuals = np.multiply(np.sqrt(weights), surf_pd - pp2)
+                return residuals
+
+            def l2_fit_loss_point_euc(C_prop, xyz_fin=pca_fin, A=A2, cp=pca_surf_cm):
+                C_full = solve_for_f(C_prop, cp)
+                fin_surf_pd = np.dot(A, C_full)
+                xyz_pd = np.concatenate((A[:, 1:3], np.reshape(fin_surf_pd, (A.shape[0],1))), axis=1)
+                dist_array = distance_matrix(xyz_fin, xyz_pd)
+                residuals = np.min(dist_array, axis=1)
+                return residuals
+
+            def l2_fit_loss_point_euc_thresh(C_prop, xyz_fin=pca_fin, A=A2, cp=pca_surf_cm, thresh=2*nn_thresh1):
+                C_full = solve_for_f(C_prop, cp)
+                fin_surf_pd = np.dot(A, C_full)
+                xyz_pd = np.concatenate((A[:, 1:3], np.reshape(fin_surf_pd, (A.shape[0], 1))), axis=1)
+                dist_array = distance_matrix(xyz_fin, xyz_pd)
+                residuals = np.min(dist_array, axis=1)
+                inlier_indices = np.where(residuals <= thresh)[0]
+                outlier_indices = np.where(residuals > thresh)[0]
+                residuals[inlier_indices] = residuals[inlier_indices]/np.sqrt(2)
+                residuals[outlier_indices] = np.sqrt(thresh*(residuals[outlier_indices]-thresh)) # Huber loss
+
+                return residuals
+
+            c0 = [-3, 0.01,  0.015, 0.001, 0.005, 0.01]
+            print("Fitting...")
+            c_fit = scipy.optimize.least_squares(l2_fit_loss_point_euc, c0[1:])
+            print("Done.")
+            # c_fit = scipy.optimize.minimize(l2_fit_loss_point_euc_thresh, np.asarray(c0[1:]), tol=1)
+            C_fit = c_fit.x
+            C = solve_for_f(C_fit, pca_surf_cm)
+            print(C_fit)
+
+            # print(C)
+            # evaluate fit on a grid
+            PP2_curve = np.dot(np.c_[np.ones(PP0.shape), PP0, PP1, PP0 * PP1, PP0 ** 2, PP1 ** 2], C).reshape(P0.shape)
+
+            xyz_fit_curve = pca.inverse_transform(np.concatenate((np.reshape(P0, (P0.size, 1)),
+                                                                  np.reshape(P1, (P1.size, 1)),
+                                                                  np.reshape(PP2_curve, (PP2_curve.size, 1))),
+                                                                 axis=1)
+                                                  )
+
+            X_fit = np.reshape(xyz_fit_curve[:, 0], (P0.shape))
+            Y_fit = np.reshape(xyz_fit_curve[:, 1], (P1.shape))
+            Z_fit_curve = np.reshape(xyz_fit_curve[:, 2], (PP2_curve.shape))
+
+            ##########
+            # filter for points inside the fin
+            # keep only points that are inside the fin
+            xyz_fin_filt = xyz_fin_filt.to_numpy()
+            xyz_array_norm = np.divide(xyz_fin_filt, np.asarray([np.max(xyz_fin_filt[:, 0]),
+                                                                 np.max(xyz_fin_filt[:, 1]),
+                                                                 np.max(xyz_fin_filt[:, 2])]))
+            # generate normalized arrays
+            X_norm = X_fit / np.max(xyz_fin_filt[:, 0])
+            Y_norm = Y_fit / np.max(xyz_fin_filt[:, 1])
+            Z_norm = Z_fit_curve / np.max(xyz_fin_filt[:, 2])
+
+            alpha_fin = alphashape.alphashape(xyz_array_norm, 4)
+
+            xyz_long = np.concatenate((np.reshape(X_norm, (X_norm.size, 1)),
+                                       np.reshape(Y_norm, (X_norm.size, 1)),
+                                       np.reshape(Z_norm, (X_norm.size, 1))),
+                                      axis=1)
+
+            inside_flags = alpha_fin.contains(xyz_long)
+            inside_mat = np.reshape(inside_flags, (P0.shape))
+
+            Z_fit_curve_filt = Z_fit_curve
+            Z_fit_curve_filt[np.where(~inside_mat)] = np.nan
+            ##########
+
+            f = go.Figure(data=[go.Surface(x=X_fit, y=Y_fit, z=Z_fit_curve_filt, opacity=0.75, showscale=False)])
+            f.add_trace(go.Scatter3d(mode='markers', x=[surf_cm[0]], y=[surf_cm[1]], z=[surf_cm[2]]))
+
+            f.add_trace(go.Mesh3d(x=xyz_fin_down[:, 0], y=xyz_fin_down[:, 1], z=xyz_fin_down[:, 2],
+                                    alphahull=9,
+                                    opacity=0.5,
+                                    color='gray'))
+            # f.add_trace(go.Scatter3d(x=xyz_fin_down[:, 0], y=xyz_fin_down[:, 1], z=xyz_fin_down[:, 2],
+            #                          mode='markers', opacity=0.6))
         ################
         # Plot predictions
-        f.add_trace(
-            go.Scatter3d(
-                mode='markers',
-                x=[df["X"].iloc[p] for p in pec_fin_nuclei],
-                y=[df["Y"].iloc[p] for p in pec_fin_nuclei],
-                z=[df["Z"].iloc[p] for p in pec_fin_nuclei],
-                marker=dict(
-                    color='lightgreen',
-                    opacity=0.5,
-                    size=5),
-                showlegend=False
-            )
-        )
+        # f.add_trace(
+        #     go.Scatter3d(
+        #         mode='markers',
+        #         x=[df["X"].iloc[p] for p in pec_fin_nuclei],
+        #         y=[df["Y"].iloc[p] for p in pec_fin_nuclei],
+        #         z=[df["Z"].iloc[p] for p in pec_fin_nuclei],
+        #         marker=dict(
+        #             color='lightgreen',
+        #             opacity=0.5,
+        #             size=5),
+        #         showlegend=False
+        #     )
+        # )
 
-        f.add_trace(
-            go.Scatter3d(
-                mode='markers',
-                x=[df["X"].iloc[p] for p in base_nuclei],
-                y=[df["Y"].iloc[p] for p in base_nuclei],
-                z=[df["Z"].iloc[p] for p in base_nuclei],
-                marker=dict(
-                    color='coral',
-                    opacity=0.5,
-                    size=5),
-                showlegend=False
-            )
-        )
-
-        f.add_trace(
-            go.Scatter3d(
-                mode='markers',
-                x=[df["X"].iloc[p] for p in other_nuclei],
-                y=[df["Y"].iloc[p] for p in other_nuclei],
-                z=[df["Z"].iloc[p] for p in other_nuclei],
-                marker=dict(
-                    color='azure',
-                    opacity=0.5,
-                    size=5),
-                showlegend=False
-            )
-        )
+        # f.add_trace(
+        #     go.Scatter3d(
+        #         mode='markers',
+        #         x=[df["X"].iloc[p] for p in base_nuclei],
+        #         y=[df["Y"].iloc[p] for p in base_nuclei],
+        #         z=[df["Z"].iloc[p] for p in base_nuclei],
+        #         marker=dict(
+        #             color='coral',
+        #             opacity=0.5,
+        #             size=5),
+        #         showlegend=False
+        #     )
+        # )
+        #
+        # f.add_trace(
+        #     go.Scatter3d(
+        #         mode='markers',
+        #         x=[df["X"].iloc[p] for p in other_nuclei],
+        #         y=[df["Y"].iloc[p] for p in other_nuclei],
+        #         z=[df["Z"].iloc[p] for p in other_nuclei],
+        #         marker=dict(
+        #             color='azure',
+        #             opacity=0.5,
+        #             size=5),
+        #         showlegend=False
+        #     )
+        # )
 
 
         return f, class_predictions
@@ -855,7 +1030,7 @@ def segment_pec_fins(dataRoot):
             # pickle.dump(model, open(model_file, 'wb'))
 
 
-    app.run_server(debug=True, port=8051)
+    app.run_server(debug=True, port=8052)
 
 if __name__ == '__main__':
 
