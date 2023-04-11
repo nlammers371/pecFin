@@ -3,11 +3,6 @@ import plotly.express as px
 from dash import dcc
 from dash import html
 from dash.dependencies import Input, Output, State
-import timeit
-from pyntcloud import PyntCloud
-import open3d as o3d
-from ome_zarr.io import parse_url
-from ome_zarr.reader import Reader
 import alphashape
 import plotly.graph_objs as go
 import pandas as pd
@@ -32,58 +27,48 @@ from sklearn.ensemble import RandomForestClassifier
 from itertools import product
 from scipy.integrate import quad
 
+# NL: I moved away from using this because it lead to unreliable results in some cases
+# def lagrange_equations(P, FDECAB, P0):
+#     x, y, z, L = P  # varibles to solve for
+#     x0, y0, z0 = P0  # coordinates of point (known)
+#     F, D, E, C, A, B = FDECAB  # curve parameters (known)
+# 
+#     # dfdx
+#     dfdx = D * L + 2 * (1 + A * L) * x - 2 * x0 + C * L * y
+#     # dfdy
+#     dfdy = E * L + C * L * x + 2 * (y + B * L * y - y0)
+#     # dfdz
+#     dfdz = 2 * z - 2 * z0 - L
+#     # dfdL
+#     dfdl = F + D * x + A * x ** 2 + y * (E + C * x + B * y) - z
+# 
+#     return (dfdx, dfdy, dfdz, dfdl)
 
-def lagrange_equations(P, FDECAB, P0):
-    x, y, z, L = P  # varibles to solve for
-    x0, y0, z0 = P0  # coordinates of point (known)
-    F, D, E, C, A, B = FDECAB  # curve parameters (known)
-
-    # dfdx
-    dfdx = D * L + 2 * (1 + A * L) * x - 2 * x0 + C * L * y
-    # dfdy
-    dfdy = E * L + C * L * x + 2 * (y + B * L * y - y0)
-    # dfdz
-    dfdz = 2 * z - 2 * z0 - L
-    # dfdL
-    dfdl = F + D * x + A * x ** 2 + y * (E + C * x + B * y) - z
-
-    return (dfdx, dfdy, dfdz, dfdl)
-
-def numerical_integral2(t, FDECAB, P0, V):
+def numerical_integral(t, FDECAB, P0, V):
     F, D, E, C, A, B = FDECAB
     v0, v1 = V
     x0, y0, _ = P0
     integrand = np.sqrt(v0**2 + v1**2 + (D*v0 + 2*A*v0*(t*v0 + x0) + v1*(E + 2*C*t*v0 + 2*B*t*v1 + C*x0) + (C*v0 + 2*B*v1)*y0)**2)
 
     return integrand
-def numerical_integral(s, FDECAB, m, b):
-    F, D, E, C, A, B = FDECAB
-    integrand = np.sqrt(1 + m ** 2 + (D + E * m + b * (C + 2 * B * m) + 2 * (A + m * (C + B * m)) * s) ** 2)
-    return integrand
 
 # helper function for calculating minimum distance between point and surface
-def definite_integral(FDECAB, m, b, s):
-    F, D, E, C, A, B = FDECAB
-    integralVal = ((D + E*m + b*(C + 2*B*m) + 2*(A + m*(C + B*m))*s)*
-                    np.sqrt(1 + m**2 + (D + E*m + b*(C + 2*B*m) + 2*(A + m*(C + B*m))*s)**2) +
-                    (1 + m**2)*np.arctanh((D + E*m + b*(C + 2*B*m) + 2*(A + m*(C + B*m))*s)/
-                    np.sqrt(1 + m**2 + (D + E*m + b*(C + 2*B*m) + 2*(A + m*(C + B*m))*s)**2)))/(4.*(A + m*(C + B*m)))
-
-    return integralVal
+#NL : the parameterization approach used here appears to be incorrect. Could be worth revisiting with improved paramterization
+# def definite_integral(FDECAB, m, b, s):
+#     F, D, E, C, A, B = FDECAB
+#     integralVal = ((D + E*m + b*(C + 2*B*m) + 2*(A + m*(C + B*m))*s)*
+#                     np.sqrt(1 + m**2 + (D + E*m + b*(C + 2*B*m) + 2*(A + m*(C + B*m))*s)**2) +
+#                     (1 + m**2)*np.arctanh((D + E*m + b*(C + 2*B*m) + 2*(A + m*(C + B*m))*s)/
+#                     np.sqrt(1 + m**2 + (D + E*m + b*(C + 2*B*m) + 2*(A + m*(C + B*m))*s)**2)))/(4.*(A + m*(C + B*m)))
+#
+#     return integralVal
 
 def calculate_path_distance(FDECAB, p0, p1):
-    # F, D, E, C, A, B = FDECAB
     dx = p0[0] - p1[0]
     dy = p0[1] - p1[1]
-    # m = dy/dx
-    # b = p0[1] - m*p0[0]
-    # T = np.sqrt(dx**2 + dy**2)
 
-    I = quad(numerical_integral2, 0, 1, args=(FDECAB, p0, [dx, dy]))
+    I = quad(numerical_integral, 0, 1, args=(FDECAB, p0, [dx, dy]))
 
-    # v0, v1 = quad(numerical_integral, p0[0], p0[1], args=(FDECAB, m, b))
-    # v0 = definite_integral(FDECAB, m, b, p0[0])
-    # v1 = definite_integral(FDECAB, m, b, p1[0])
     return I[1] - I[0]
 
 
@@ -130,21 +115,21 @@ def solve_for_f(C_fit, cp):
     C_out = [C0, C_fit[0], C_fit[1], C_fit[2], C_fit[3], C_fit[4]]
     return C_out
 
-def predict_quadratic_surface2(xy, DECA, base_point, sphere_point):
-
-    # first, solve for B given constraint that tangent plane must pass thrhoug sphere center
-    plane_vec_norm, D, B = calculate_tangent_plane2(DECA, base_point, sphere_point)
-    DECAB = [DECA[0], DECA[1], DECA[2], DECA[3], B]
-
-    # then solve for F
-    C_full = solve_for_f(DECAB, base_point)
-
-    # predict surface
-    A = np.c_[np.ones(xy.shape[0]), xy, np.prod(xy, axis=1), xy**2]
-    surf_pd = np.dot(A, C_full).ravel()
-    xyz_out = np.concatenate((xy, np.reshape(surf_pd, (xy.shape[0], 1))), axis=1)
-
-    return xyz_out, C_full, plane_vec_norm, D
+# def predict_quadratic_surface2(xy, DECA, base_point, sphere_point):
+#
+#     # first, solve for B given constraint that tangent plane must pass thrhoug sphere center
+#     plane_vec_norm, D, B = calculate_tangent_plane2(DECA, base_point, sphere_point)
+#     DECAB = [DECA[0], DECA[1], DECA[2], DECA[3], B]
+#
+#     # then solve for F
+#     C_full = solve_for_f(DECAB, base_point)
+#
+#     # predict surface
+#     A = np.c_[np.ones(xy.shape[0]), xy, np.prod(xy, axis=1), xy**2]
+#     surf_pd = np.dot(A, C_full).ravel()
+#     xyz_out = np.concatenate((xy, np.reshape(surf_pd, (xy.shape[0], 1))), axis=1)
+#
+#     return xyz_out, C_full, plane_vec_norm, D
 
 def predict_quadratic_surface(xy, DECAB, point):
     C_full = solve_for_f(DECAB, point)
@@ -153,10 +138,19 @@ def predict_quadratic_surface(xy, DECAB, point):
     xyz_out = np.concatenate((xy, np.reshape(surf_pd, (xy.shape[0], 1))), axis=1)
 
     return xyz_out, C_full
-def fit_quadratic_surface(df, c0, pec_fin_nuclei, r):
+
+def fit_quadratic_surface(df, c0, pec_fin_nuclei, r, k_nn=7):
+    """
+
+    :param df: Pandas dataframe contining xyz coordinates of all nuclei
+    :param c0: 1x3 vector containing coordinates of sphere center
+    :param pec_fin_nuclei: Integer vector containing indices of all nuclei that are part of the pec fin
+    :param r: [float] radius of the sphere
+    :param k_nn: [int] designates which neighbor in the NN graph to use to set the length scale for axis fitting
+    :return:
+    """
     # fit corresponding plane
     # get nn distances
-    k_nn = 7
     xyz_array = df[["X", "Y", "Z"]].to_numpy()
     tree = KDTree(xyz_array)
     nearest_dist, nearest_ind = tree.query(xyz_array, k=k_nn + 1)
@@ -176,18 +170,19 @@ def fit_quadratic_surface(df, c0, pec_fin_nuclei, r):
     surf_cm = np.mean(xyz_surf, axis=0)
 
     # calculate PCA
-    pca = PCA(n_components=3)
+    pca_surf = PCA(n_components=3)
 
-    # xyz_grid = np.concatenate((xyz_surf[:, 0], xyz_surf[:, 1], xyz_surf[:, 2), axis=1)
-    pca.fit(xyz_surf)
-    vec1 = pca.components_[0]
+    pca_surf.fit(xyz_surf)
+    vec1 = pca_surf.components_[0]
     vec2 = surf_cm - c0
     vec2 = vec2 / np.sqrt(np.sum(vec2 ** 2))
     plane_normal = np.cross(vec1, vec2)
     plane_normal_u = plane_normal / np.sqrt(np.sum(plane_normal ** 2))
     D_plane = -np.dot(plane_normal, surf_cm)
 
-    # generate additional points
+    # generate additional points to constrain the axis fit such that it is approximately normal to the sphere when
+    # it intersects the sphere surface
+    # In future, we could consider adding a constraint directly to the objective function that enforces this
     c_vec = surf_cm - c0
     c_vec_u = c_vec / np.sqrt(np.sum(c_vec ** 2))
     lower_point = surf_cm - 2*c_vec_u*nn_thresh_small
@@ -218,89 +213,86 @@ def fit_quadratic_surface(df, c0, pec_fin_nuclei, r):
 
     # find average distance to kth closest neighbor
     mean_nn_dist_vec = np.mean(nearest_dist, axis=0)
-    nn_thresh1 = mean_nn_dist_vec[1]
+    nn_thresh1 = mean_nn_dist_vec[1] # sets scale for downsampling withing the fin
 
+    # downsample to achieve uniform distribution of fit points
     pcd = o3d.geometry.PointCloud()
     pcd.points = o3d.utility.Vector3dVector(xyz_fin.to_numpy())
     pcd_down = pcd.voxel_down_sample(voxel_size=nn_thresh1 * 1.5)
     xyz_fin_down = np.asarray(pcd_down.points)
 
     # Transform to PCA space
-    pca = PCA(n_components=3)
-    pca.fit(xyz_fin_down)
-    pca_fin_full = pca.transform(xyz_fin_raw.to_numpy())
-    pca_fin_raw = pca.transform(xyz_fin_down)
-    pca_add_array = pca.transform(add_array)
-    pca_fin_surf = pca.transform(xyz_surf)
+    PCAFIN = PCA(n_components=3)
+    PCAFIN.fit(xyz_fin_raw.to_numpy())
+    pca_fin_full = PCAFIN.transform(xyz_fin_raw.to_numpy())
+    pca_fin_raw = PCAFIN.transform(xyz_fin_down)
+    pca_fin_add_array = PCAFIN.transform(add_array)
+    pca_fin_surf = PCAFIN.transform(xyz_surf)
 
-    # use kmeans to find key points
+    # use kmeans to find key points. Note that we cluster only in PCA0-PCA1 space
     n_clusters = 100
     kmeans = KMeans(n_clusters=n_clusters).fit(pca_fin_raw[:, 0:2])
     k_labels = kmeans.labels_
-    pca_fin = np.empty((n_clusters, 3))
+    pca_fin_array = np.empty((n_clusters, 3))
     for n in range(n_clusters):
         k_indices = np.where(k_labels == n)[0]
-        pca_fin[n, :] = np.mean(pca_fin_raw[k_indices, :], axis=0)
+        pca_fin_array[n, :] = np.mean(pca_fin_raw[k_indices, :], axis=0)
 
-    pca_fin = np.concatenate((pca_fin, pca_add_array), axis=0)
-    # pca_fin = kmeans.cluster_centers_
+    pca_fin_array = np.concatenate((pca_fin_array, pca_fin_add_array), axis=0)
 
-    pca_surf_cm = pca.transform(np.reshape(surf_cm, (1, 3)))
-    pca_surf_cm = pca_surf_cm.ravel()
+    # Transform fin base and sphere center points to PCA space
+    pca_fin_surf_cm = PCAFIN.transform(np.reshape(surf_cm, (1, 3)))
+    pca_fin_surf_cm = pca_fin_surf_cm.ravel()
+    pca_fin_c0 = PCAFIN.transform(np.reshape(c0, (1, 3)))
+    pca_fin_c0 = pca_fin_c0.ravel()
 
-    pca_c0 = pca.transform(np.reshape(c0, (1, 3)))
-    pca_c0 = pca_c0.ravel()
-    
-    # print(pca_surf_cm)
-    # generate grid to be used for surface generation
-    grid_res = 25
+    # generate reference grid for use during the fit procedure
+    grid_res = 100
     P0, P1 = np.meshgrid(np.linspace(np.min(pca_fin_raw[:, 0]), np.max(pca_fin_raw[:, 0]), grid_res),
                          np.linspace(np.min(pca_fin_raw[:, 1]), np.max(pca_fin_raw[:, 1]), grid_res))
 
     PP0 = P0.flatten()
     PP1 = P1.flatten()
 
-    # def l2_fit_loss_point(C_prop, xy=pca_fin[:, 0:2], pp2=pca_fin[:, 2].ravel(), cp=pca_surf_cm):
-    #     xyz_pd = predict_quadratic_surface(xy, C_prop, cp)
-    #     residuals = xyz_pd[:, 2] - pp2
-    #     return residuals
-
     xy2 = np.concatenate((PP0[:, np.newaxis], PP1[:, np.newaxis]), axis=1)
-    def l2_fit_loss_point_euc(C_prop, xyz_fin=pca_fin, xy=xy2, cp=pca_surf_cm):
+    def l2_fit_loss_point_euc(C_prop, xyz_fin=pca_fin_array, xy=xy2, cp=pca_fin_surf_cm):
         xyz_pd, C0_full = predict_quadratic_surface(xy, C_prop, cp)
         dist_array = distance_matrix(xyz_fin, xyz_pd)
         residuals = np.min(dist_array, axis=1)
         return residuals
 
-    def l2_fit_loss_plane_euc(C_prop, xyz_fin=pca_fin, xy=xy2, cp=pca_surf_cm, sp=pca_c0):
-        xyz_pd, C0_full, _, _ = predict_quadratic_surface2(xy, C_prop, cp, sp)
-        dist_array = distance_matrix(xyz_fin, xyz_pd)
-        residuals = np.min(dist_array, axis=1)
-        return residuals
+    # NL: this version directly enforces that the surface be normal to the sphere where it intersects the surface
+    # I found that this lead to poor fit quality, but worth further exploration
+    # def l2_fit_loss_plane_euc(C_prop, xyz_fin=pca_fin, xy=xy2, cp=pca_fin_surf_cm, sp=pca_fin_c0):
+    #     xyz_pd, C0_full, _, _ = predict_quadratic_surface2(xy, C_prop, cp, sp)
+    #     dist_array = distance_matrix(xyz_fin, xyz_pd)
+    #     residuals = np.min(dist_array, axis=1)
+    #     return residuals
 
+    # initial guess
     c0 = [-3, 0.01, 0.015, 0.001, 0.005, 0.01]
+    
+    # Conduct the fit
     c_fit = scipy.optimize.least_squares(l2_fit_loss_point_euc, c0[1:])
     C_fit = c_fit.x
+    C_out = solve_for_f(C_fit, pca_fin_surf_cm)
+    P2_curve = np.dot(np.c_[np.ones(PP0.shape), PP0, PP1, PP0 * PP1, PP0 ** 2, PP1 ** 2], C_out).reshape(P0.shape)
 
-    C_out = solve_for_f(C_fit, pca_surf_cm)
-    # xyz_pd, C, normal_vec, D = predict_quadratic_surface2(xy2, C_fit, pca_surf_cm, pca_c0)
-    PP2_curve = np.dot(np.c_[np.ones(PP0.shape), PP0, PP1, PP0 * PP1, PP0 ** 2, PP1 ** 2], C_out).reshape(P0.shape)
-
-    xyz_fit_curve = pca.inverse_transform(np.concatenate((np.reshape(P0, (P0.size, 1)),
+    xyz_fit_curve = PCAFIN.inverse_transform(np.concatenate((np.reshape(P0, (P0.size, 1)),
                                                           np.reshape(P1, (P1.size, 1)),
-                                                          np.reshape(PP2_curve, (PP2_curve.size, 1))),
+                                                          np.reshape(P2_curve, (P2_curve.size, 1))),
                                                          axis=1)
                                           )
 
-    normal_vec, D = calculate_tangent_plane(C_out, pca_surf_cm)
-    plane_pd = -(normal_vec[0] * P0 + normal_vec[1] * P1 + D) / normal_vec[2]
-
-
-    xyz_plane = pca.inverse_transform(np.concatenate((np.reshape(P0, (P0.size, 1)),
-                                                      np.reshape(P1, (P1.size, 1)),
-                                                      np.reshape(plane_pd, (plane_pd.size, 1))),
-                                                      axis=1)
-                                      )
+    # normal_vec, D = calculate_tangent_plane(C_out, pca_fin_surf_cm)
+    # plane_pd = -(normal_vec[0] * P0 + normal_vec[1] * P1 + D) / normal_vec[2]
+    # 
+    # 
+    # xyz_plane = pca_fin.inverse_transform(np.concatenate((np.reshape(P0, (P0.size, 1)),
+    #                                                   np.reshape(P1, (P1.size, 1)),
+    #                                                   np.reshape(plane_pd, (plane_pd.size, 1))),
+    #                                                   axis=1)
+    #                                   )
 
     ##########
     # sample points that fall approximately at the intersection of sphere and surface
@@ -312,42 +304,35 @@ def fit_quadratic_surface(df, c0, pec_fin_nuclei, r):
     P2B = np.dot(np.c_[np.ones(PP0B.shape), PP0B, PP1B, PP0B * PP1B, PP0B ** 2, PP1B ** 2], C_out).reshape(P0B.shape)
     PP2B = P2B.flatten()
 
-    pca_pd_array = np.concatenate((PP0B[:, np.newaxis], PP1B[:, np.newaxis], PP2B[:, np.newaxis]), axis=1)
-    xyz_pd_array = pca.inverse_transform(pca_pd_array)
+    pca_fin_pd_array = np.concatenate((PP0B[:, np.newaxis], PP1B[:, np.newaxis], PP2B[:, np.newaxis]), axis=1)
 
     ############
     # Calculate AP position of each base point. These will be used to assign AP positions to fin nuclei
     ##############
-    # Now, calculate PD position for each fin nucleus
     # first, find points at intersection of surface and sphere
-    sp_dist_array = np.abs(np.sqrt(np.sum((pca_pd_array - pca_c0) ** 2, axis=1)) - r)
-    # print(xyz_pd_array)
+    sp_dist_array = np.abs(np.sqrt(np.sum((pca_fin_pd_array - pca_fin_c0) ** 2, axis=1)) - r)
     close_indices = np.where(sp_dist_array <= 1)[0]
-    pca_pd_base = pca_pd_array[close_indices]
-
-    # find point that is farthest away from plane defined by known points
-    pca_b = PCA(n_components=3)
-    pca_b.fit(pca_pd_base)
-    pca_pca_b = pca_b.transform(pca_pd_base)
-    ap_ind1 = np.argmin(pca_pca_b[:, 0])
-
-    # identify point to use as reference
-    # ap_ind1 = np.argmin(D_scores)
-    ap_ref_point = pca_pd_base[ap_ind1, :]
+    pca_fin_pd_base = pca_fin_pd_array[close_indices]
+    xyz_pd_array = PCAFIN.inverse_transform(pca_fin_pd_base)
+    
+    # find end point using the first principal component
+    pca_fin_b = PCA(n_components=3)
+    pca_fin_b.fit(pca_fin_pd_base)
+    pca_pca_fin_b = pca_fin_b.transform(pca_fin_pd_base)
+    ap_ind1 = np.argmin(pca_pca_fin_b[:, 0])
+    ap_ref_point = pca_fin_pd_base[ap_ind1, :]
+    
     # now, find pd distance for each projected surface point
-    ap_pos_base = np.empty((pca_pd_base.shape[0],))
-
+    ap_pos_base = np.empty((pca_fin_pd_base.shape[0],))
     for a in range(ap_pos_base.shape[0]):
-        ap_pos_base[a] = calculate_path_distance(FDECAB=C_out, p0=ap_ref_point, p1=pca_pd_base[a, :])
+        ap_pos_base[a] = calculate_path_distance(FDECAB=C_out, p0=ap_ref_point, p1=pca_fin_pd_base[a, :])
 
     ############
     # Find closest point to each nucleus that is on the inferred surface
-    pca_point_surf = np.empty((pca_fin_full.shape))
+    pca_fin_point_surf = np.empty((pca_fin_full.shape))
+    dv_dist_vec = np.empty((pca_fin_full.shape[0], 1))
     for p in range(pca_fin_full.shape[0]):
         Pinit = pca_fin_full[p, :]
-        # def call_lagrange(P, P0=Pinit, FDECAB=C_out):
-        #     x, y, z, L = lagrange_equations(P, P0=P0, FDECAB=FDECAB)
-        #     return (x, y, z, L)
 
         def z_fun(x, y, C0=C_out):
             F, D, E, C, A, B = C0  # curve parameters (known)
@@ -368,50 +353,79 @@ def fit_quadratic_surface(df, c0, pec_fin_nuclei, r):
         fit = scipy.optimize.least_squares(dist_fun, [10, 10], max_nfev=1e3, ftol=1e-12)
         x, y = fit.x
         z = z_fun(x, y, C_out)
-        # x, y, z, _ = fsolve(call_lagrange, np.asarray([100, 100, 100, 1]))
 
-        pca_point_surf[p, :] = x, y, z
+        # store coordinates
+        pca_fin_point_surf[p, :] = x, y, z
 
-    xyz_point_surf = pca.inverse_transform(pca_point_surf)
-    # xyz_fin = pca.inverse_transform(pca_fin_full)
+        # use this to calculate DV distance (signed euclidean distance from surface)
+        normal_vec, D = calculate_tangent_plane(C_out, [x, y, z])
+        plane_dist = np.dot(normal_vec, Pinit) + D
+        dv_dist_vec[p] = plane_dist
 
+    xyz_point_surf = PCAFIN.inverse_transform(pca_fin_point_surf)
+
+    ##############
     # now, find pd distance for each projected surface point
     pd_pos = np.empty((pca_fin_full.shape[0],))
     pd_i = np.empty((pca_fin_full.shape[0],))
 
-    for p in range(pca_point_surf.shape[0]):
-        surf_point = pca_point_surf[p, :]
-        dist_list = np.empty((pca_pd_base.shape[0],))
-        for pd in range(pca_pd_base.shape[0]):
-            dist_list[pd] = calculate_path_distance(FDECAB=C_out, p0=surf_point, p1=pca_pd_base[pd, :])
-            # dist_list[pd] = np.sqrt(np.sum((surf_point-pca_pd_base[pd, :])**2))
+    for p in range(pca_fin_point_surf.shape[0]):
+        surf_point = pca_fin_point_surf[p, :]
+        dist_list = np.empty((pca_fin_pd_base.shape[0],))
+        for pd in range(pca_fin_pd_base.shape[0]):
+            dist_list[pd] = calculate_path_distance(FDECAB=C_out, p0=surf_point, p1=pca_fin_pd_base[pd, :])
 
         # find closest base point
-        # print(dist_list)
         min_i = np.argmin(np.abs(dist_list))
         pd_i[p] = min_i
         pd_pos[p] = dist_list[min_i]
 
-    print(pd_i)
+    # use ID of closest base point to assign AP position
     pd_i = pd_i.astype(int)
-    ap_pos = ap_pos_base[pd_i] # use ID of closest base point to assign AP position
-    f = go.Figure()
-    # f.add_trace(go.Scatter3d(mode='markers', x=pca_point_surf[:, 0], y=pca_point_surf[:, 1], z=pca_point_surf[:, 2],
-    #                          marker=dict(color=pd_pos, opacity=0.7)))
-    #
-    f.add_trace(
-        go.Scatter3d(mode='markers', x=pca_pd_base[:, 0], y=pca_pd_base[:, 1], z=pca_pd_base[:, 2],
-                     marker=dict(color=ap_pos_base, opacity=0.7)))
-    # f.show()
-    # f = go.Figure()
-    # for p in range(0, 40):
-    #     f.add_trace(go.Scatter3d(x=[pca_fin_full[p, 0], pca_point_surf[p, 0]],
-    #                              y=[pca_fin_full[p, 1], pca_point_surf[p, 1]],
-    #                              z=[pca_fin_full[p, 2], pca_point_surf[p, 2]]))
-    #
-    # f.add_trace(go.Surface(x=P0, y=P1, z=PP2_curve, opacity=0.75, showscale=False))
-    f.show()
-    return xyz_fit_curve, C_out, surf_cm, P0, xyz_plane, add_array, xyz_pd_array, xyz_point_surf, pd_pos, ap_pos
+    ap_pos = ap_pos_base[pd_i] 
+    
+    return xyz_fit_curve, C_out, surf_cm, P0, xyz_pd_array, xyz_point_surf, pd_pos, ap_pos, dv_dist_vec, PCAFIN
+
+
+def generate_quadratic_surface(df, surface_model, pec_fin_nuclei):
+    """
+
+    :param df: Pandas dataframe contining xyz coordinates of all nuclei
+    :param surface_model: parameters specifying quadratic surface that defines the fin
+    :param pec_fin_nuclei: Integer vector containing indices of all nuclei that are part of the pec fin
+    :param pca_fin: PCA model usef to transform fin coordinates
+    :return: xyz_fit_curv: Nx3 array containing coordinates of fit surface
+    """
+    # fit corresponding plane
+    # get nn distances
+
+    #######################
+    # fit surface to fin points
+    #######################
+    xyz_fin_raw = df[["X", "Y", "Z"]].iloc[pec_fin_nuclei].to_numpy()
+
+    # Transform to PCA space
+    pca_fin = PCA(n_components=3)
+    pca_fin.fit(xyz_fin_raw)
+    pca_fin_full = pca_fin.transform(xyz_fin_raw)
+
+
+    # generate reference grid for use during the fit procedure
+    grid_res = 100
+    P0, P1 = np.meshgrid(np.linspace(np.min(pca_fin_full[:, 0]), np.max(pca_fin_full[:, 0]), grid_res),
+                         np.linspace(np.min(pca_fin_full[:, 1]), np.max(pca_fin_full[:, 1]), grid_res))
+
+    PP0 = P0.flatten()
+    PP1 = P1.flatten()
+
+    P2_curve = np.dot(np.c_[np.ones(PP0.shape), PP0, PP1, PP0 * PP1, PP0 ** 2, PP1 ** 2], surface_model).reshape(P0.shape)
+
+    xyz_fit_curve = pca_fin.inverse_transform(np.concatenate((np.reshape(P0, (P0.size, 1)),
+                                                          np.reshape(P1, (P1.size, 1)),
+                                                          np.reshape(P2_curve, (P2_curve.size, 1))),
+                                                          axis=1)
+                                             )
+    return xyz_fit_curve
 
 def cart_to_sphere(xyz):
     ptsnew = np.zeros(xyz.shape)
@@ -421,29 +435,30 @@ def cart_to_sphere(xyz):
     ptsnew[:, 2] = np.arctan2(xyz[:, 1], xyz[:, 0])
     return ptsnew
 
-def sphereFit(spX,spY,spZ):
-    #   Assemble the A matrix
-    spX = np.array(spX)
-    spY = np.array(spY)
-    spZ = np.array(spZ)
-    A = np.zeros((len(spX),4))
-    A[:,0] = spX*2
-    A[:,1] = spY*2
-    A[:,2] = spZ*2
-    A[:,3] = 1
-
-    #   Assemble the f matrix
-    f = np.zeros((len(spX),1))
-    f[:,0] = (spX*spX) + (spY*spY) + (spZ*spZ)
-    C, residules, rank, singval = np.linalg.lstsq(A,f)
-
-    #   solve for the radius
-    t = (C[0]*C[0])+(C[1]*C[1])+(C[2]*C[2])+C[3]
-    radius = math.sqrt(t)
-
-    return radius, C[0], C[1], C[2]
+# def sphereFit(spX,spY,spZ):
+#     #   Assemble the A matrix
+#     spX = np.array(spX)
+#     spY = np.array(spY)
+#     spZ = np.array(spZ)
+#     A = np.zeros((len(spX),4))
+#     A[:,0] = spX*2
+#     A[:,1] = spY*2
+#     A[:,2] = spZ*2
+#     A[:,3] = 1
+# 
+#     #   Assemble the f matrix
+#     f = np.zeros((len(spX),1))
+#     f[:,0] = (spX*spX) + (spY*spY) + (spZ*spZ)
+#     C, residules, rank, singval = np.linalg.lstsq(A,f)
+# 
+#     #   solve for the radius
+#     t = (C[0]*C[0])+(C[1]*C[1])+(C[2]*C[2])+C[3]
+#     radius = math.sqrt(t)
+# 
+#     return radius, C[0], C[1], C[2]
 
 def sphereFit_fixed_r(spX,spY,spZ,r0):
+    
     #   Assemble the A matrix
     spX = np.array(spX)
     spY = np.array(spY)
@@ -460,10 +475,7 @@ def sphereFit_fixed_r(spX,spY,spZ,r0):
         return res
 
     C = scipy.optimize.least_squares(ob_fun, c0, bounds=([-np.inf, -np.inf, -np.inf], [np.inf, np.inf, 0]))
-    #   solve for the radius
-    # t = (C[0]*C[0])+(C[1]*C[1])+(C[2]*C[2])+C[3]
-    # radius = math.sqrt(t)
-    # print(C)
+
     return r0, C.x[0], C.x[1], C.x[2]
 
 def calculate_distance_metrics(fin_tip_point, point_stat_raw, AG):
@@ -481,20 +493,16 @@ def calculate_distance_metrics(fin_tip_point, point_stat_raw, AG):
         name = "*".join(i)
         xyz_df[name] = xyz_df[list(i)].prod(axis=1)
 
-    # xyz_df_norm = xyz_df.copy() - np.min(xyz_df.iloc[:], axis=0)
-    # xyz_df_norm = np.divide(xyz_df_norm, np.max(xyz_df_norm.iloc[:], axis=0))
     # Graph-based stuff
     if fin_tip_point:
         fin_tip_ind = fin_tip_point[0]["pointNumber"]
     else:
         fin_tip_ind = []
     tip_dists = calculate_network_distances(fin_tip_ind, AG)
-    # print(sph_df.head())
+    
     # combine
     point_stat_df = pd.concat((sph_df, xyz_df), axis=1)
     point_stat_df["fin_tip_dists"] = tip_dists
-    # print(point_stat_df.columns)
-    # point_stat_df = point_stat_raw.iloc[:, 0]
 
     return point_stat_df
 
@@ -517,9 +525,8 @@ def calculate_network_distances(point, G):
 
     return dist_array
 
-def calculate_adjacency_graph(df):
-    k_nn = 5
-
+def calculate_adjacency_graph(df, k_nn = 5):
+    
     # calculate KD tree and use this to determine k nearest neighbors for each point
     xyz_array = df[["X", "Y", "X"]]
     # print(xyz_array)
@@ -582,18 +589,18 @@ def calculate_point_cloud_stats(df):
     return point_stat_raw
 
 
-def logistic_regression(features_train, features_all, fin_class, model=None):
+def call_random_forest(features_train, features_all, fin_class, model=None):
 
     # print(features_train.head(2))
     if model == None:
         model = RandomForestClassifier(random_state=0)#, class_weight='balanced')
 
     # features_train = features_train[:, np.newaxis]
-
     model.fit(features_train, fin_class.ravel())
     predictions = model.predict(features_all)
 
     return predictions, model
+
 def polyval2d(x, y, m):
     order = int(np.sqrt(len(m))) - 1
     ij = itertools.product(range(order + 1), range(order + 1))
@@ -611,8 +618,6 @@ def polyfit2d(x, y, z, order=2):
     m, _, _, _ = np.linalg.lstsq(G, z)
     return m
 
-
-
 def segment_pec_fins(dataRoot):
 
     global fileList, imNameList
@@ -624,11 +629,6 @@ def segment_pec_fins(dataRoot):
         labelName = labelName.replace('_nucleus_props.csv', '')
         imNameList.append(labelName)
 
-    #filename = imNameList[0]
-    #global fin_points_prev, base_points_prev, class_predictions_curr, curationPath, propPath
-
-    #fin_points_prev = []
-    #base_points_prev = []
 
     def load_nucleus_dataset(filename):
 
@@ -656,17 +656,22 @@ def segment_pec_fins(dataRoot):
             raise Exception(
                 f"Selected dataset( {filename} ) dataset has no nucleus data. Have you run extract_nucleus_stats?")
 
+        # Is should change this to store all of these attributes within a single dictionary
         base_points_prev = []
         fin_points_prev = []
         other_points_prev = []
         class_predictions_curr = []
         fin_tip_prev = []
+        # pca_fin_prev = []
+        fin_surf_prev = []
 
         # load key info from previous session
         base_path = curationPath + 'base_points.pkl'
         other_path = curationPath + 'other_points.pkl'
         fin_path = curationPath + 'fin_points.pkl'
         fin_tip_path = curationPath + 'fin_tip_point.pkl'
+        # pca_fin_path = curationPath + 'pca_fin_params.pkl'
+        fin_surf_path = curationPath + 'fin_surf_model.pkl'
 
         if os.path.isfile(base_path):
             with open(base_path, 'rb') as fn:
@@ -688,27 +693,35 @@ def segment_pec_fins(dataRoot):
                 fin_tip_prev = pickle.load(fn)
             fin_tip_prev = json.loads(fin_tip_prev)
 
+        # if os.path.isfile(pca_fin_path):
+        #     with open(pca_fin_path, 'rb') as fn:
+        #         pca_fin_prev = pickle.load(fn)
+        #     pca_fin_prev = json.loads(pca_fin_prev)
+
+        if os.path.isfile(fin_surf_path):
+            with open(fin_surf_path, 'rb') as fn:
+                fin_surf_prev = pickle.load(fn)
+            fin_surf_prev = json.loads(fin_surf_prev)
+
         if 'pec_fin_flag' in df:
             class_predictions_curr = df['pec_fin_flag']
 
         return {"df": df, "class_predictions_curr": class_predictions_curr, "fin_points_prev": fin_points_prev,
                 "base_points_prev": base_points_prev, "other_points_prev": other_points_prev, "propPath": propPath,
-                "fin_tip_prev": fin_tip_prev, "curationPath": curationPath, "model_data": model_data, "model": model}
+                "fin_tip_prev": fin_tip_prev, "curationPath": curationPath, "fin_surf_prev": fin_surf_prev}
 
     df_dict = load_nucleus_dataset(imNameList[0])
 
-    global base_points_prev, fin_points_prev, other_points_prev, fin_tip_prev, class_predictions_curr
+    global base_points_prev, fin_points_prev, other_points_prev, fin_tip_prev, class_predictions_curr, pca_fin_prev, fin_surf_prev
 
     df = df_dict["df"]
     base_points_prev = df_dict["base_points_prev"]
     other_points_prev = df_dict["other_points_prev"]
     fin_points_prev = df_dict["fin_points_prev"]
     fin_tip_prev = df_dict["fin_tip_prev"]
+    fin_surf_prev = df_dict["fin_surf_prev"]
+    # pca_fin_prev = df_dict["pca_fin_prev"]
     class_predictions_curr = df_dict["class_predictions_curr"]
-
-    ####
-    # set plot boundaries
-
 
     ########################
     # App
@@ -753,6 +766,8 @@ def segment_pec_fins(dataRoot):
                         html.Div(id='base_points', hidden=True),
                         html.Div(id='fin_points', hidden=True),
                         html.Div(id='fin_tip_point', hidden=True),
+                        # html.Div(id='pca_fin', hidden=True),
+                        html.Div(id='fin_surf_model', hidden=True),
                         html.Div(id='pfin_nuclei', hidden=True),
                       
                         html.Div([
@@ -773,7 +788,6 @@ def segment_pec_fins(dataRoot):
         Input('dataset-dropdown', 'value')
     )
     def load_wrapper(value):
-        #[xyz_array, base_points_prev, fin_points_prev, class_predictions_curr])
         return value
 
     @app.callback(
@@ -781,7 +795,6 @@ def segment_pec_fins(dataRoot):
         Input('class-dropdown', 'value')
     )
     def load_wrapper(value):
-        # [xyz_array, base_points_prev, fin_points_prev, class_predictions_curr])
         return value
 
     @app.callback([Output('base_points', 'children'),
@@ -851,6 +864,7 @@ def segment_pec_fins(dataRoot):
             if fin_tip_prev:
                 fin_tip_point = [fin_tip_prev[0]]
 
+
         if '3d_scat.clickData' in ids:
             if class_val == "Base Surface":
                 xyz_nf = np.round([[base_results[i]["x"], base_results[i]["y"], base_results[i]["z"]] for i in
@@ -896,6 +910,7 @@ def segment_pec_fins(dataRoot):
             other_results = []
             fin_tip_point = []
 
+        # This guards against weird error where click sometimes does not store point coordinates
         if fin_tip_point:
             if "x" not in fin_tip_point[0]:
                 fin_tip_point = []
@@ -905,20 +920,23 @@ def segment_pec_fins(dataRoot):
         other_results = json.dumps(other_results)
         fin_tip_point = json.dumps(fin_tip_point)
 
-        init_toggle = False
+        init_toggle = False #NL: does this do anything?
+
         return base_results, other_results, fin_results, fin_tip_point
 
     @app.callback([Output('3d_scat', 'figure'),
-                   Output('pfin_nuclei', 'children')],
+                   Output('pfin_nuclei', 'children'),
+                   Output('fin_surf_model', 'children')],
                 [Input('pfin_nuclei', 'children'),
                  Input('base_points', 'children'),
                  Input('other_points', 'children'),
                  Input('fin_points', 'children'),
                  Input('fin_tip_point', 'children'),
                  Input('calc-button', 'n_clicks'),
-                 Input('dd-output-container', 'children')])
+                 Input('dd-output-container', 'children')],
+                   [State('fin_surf_model', 'children')])
 
-    def chart_3d(class_predictions_in, base_points, other_points, fin_points, fin_tip_point, n_clicks, fileName):
+    def chart_3d(class_predictions_in, base_points, other_points, fin_points, fin_tip_point, n_clicks, fileName, fin_surf_model):
 
         global f
 
@@ -928,15 +946,39 @@ def segment_pec_fins(dataRoot):
         df_dict = load_nucleus_dataset(fileName)
         df = df_dict["df"]
 
-        # calculate axis limits
-        xmin = np.min(df["X"].iloc[:]) + 5
-        xmax = np.max(df["X"].iloc[:]) - 5
+        # pca_fin_prev = df_dict["pca_fin_prev"]
+        fin_surf_prev = df_dict["fin_surf_prev"]
 
-        ymin = np.min(df["Y"].iloc[:]) - 5
-        ymax = np.max(df["Y"].iloc[:]) + 5
 
-        zmin = np.min(df["Z"].iloc[:]) - 3
-        zmax = np.max(df["Z"].iloc[:]) + 3
+        # if pca_fin and ('dd-output-container' not in changed_id):
+        #     pca_fin = json.loads(pca_fin)
+        # else:
+        #     pca_fin = []
+
+        if fin_surf_model and ('dd-output-container' not in changed_id):
+            fin_surf_model = json.loads(fin_surf_model)
+        else:
+            fin_surf_model = []
+
+        if ('dd-output-container' in changed_id) | init_toggle:
+            # if pca_fin_prev:
+            #     pca_fin = pca_fin_prev
+
+            if fin_surf_prev:
+                fin_surf_model = fin_surf_prev
+
+        if ('clear' in changed_id):
+            fin_surf_model = []
+            # pca_fin = []
+        # # calculate axis limits
+        # xmin = np.min(df["X"].iloc[:]) + 5
+        # xmax = np.max(df["X"].iloc[:]) - 5
+        # 
+        # ymin = np.min(df["Y"].iloc[:]) - 5
+        # ymax = np.max(df["Y"].iloc[:]) + 5
+        # 
+        # zmin = np.min(df["Z"].iloc[:]) - 3
+        # zmax = np.max(df["Z"].iloc[:]) + 3
 
         class_predictions_curr = df_dict["class_predictions_curr"]
 
@@ -1056,7 +1098,7 @@ def segment_pec_fins(dataRoot):
 
                 df_lb = point_stat_df.iloc[lb_indices]
 
-                class_predictions, model = logistic_regression(df_lb, point_stat_df, fin_class_vec)
+                class_predictions, model = call_random_forest(df_lb, point_stat_df, fin_class_vec)
 
             else:
                 class_predictions = np.zeros((df.shape[0],))
@@ -1068,46 +1110,105 @@ def segment_pec_fins(dataRoot):
 
         pec_fin_nuclei = np.where(np.asarray(class_predictions) == 2)[0]
         base_nuclei = np.where(np.asarray(class_predictions) == 1)[0]
-        other_nuclei = np.where(np.asarray(class_predictions) == 0)[0]
+        # other_nuclei = np.where(np.asarray(class_predictions) == 0)[0]
 
-        if (len(base_nuclei) > 0) and (len(pec_fin_nuclei) > 0):
-            # fit sphere
-            xyz_base = df[["X", "Y", "Z"]].iloc[base_nuclei]
-            xyz_base = xyz_base.to_numpy()
-            # print(xyz_base)
-            r, x0, y0, z0 = sphereFit_fixed_r(xyz_base[:, 0], xyz_base[:, 1], xyz_base[:, 2], 250)
-            u, v = np.mgrid[0:2 * np.pi:200j, 0:np.pi:100j]
-            x = np.cos(u) * np.sin(v) * r
-            y = np.sin(u) * np.sin(v) * r
-            z = np.cos(v) * r
-            x_sphere = x + x0
-            y_sphere = y + y0
-            z_sphere = z + z0
+        xyz_fit_curve = []
+        print(fin_surf_model)
+        # fin_surf_model = json.loads(fin_surf_model)
+        # pca_fin = json.loads(pca_fin)
+        if 'calc-button' in changed_id:
+            if (len(base_nuclei) > 0) and (len(pec_fin_nuclei) > 0):
+                # fit sphere
+                xyz_base = df[["X", "Y", "Z"]].iloc[base_nuclei]
+                xyz_base = xyz_base.to_numpy()
+                # print(xyz_base)
+                r, x0, y0, z0 = sphereFit_fixed_r(xyz_base[:, 0], xyz_base[:, 1], xyz_base[:, 2], 250)
+                # u, v = np.mgrid[0:2 * np.pi:200j, 0:np.pi:100j]
+                # x = np.cos(u) * np.sin(v) * r
+                # y = np.sin(u) * np.sin(v) * r
+                # z = np.cos(v) * r
+                # x_sphere = x + x0
+                # y_sphere = y + y0
+                # z_sphere = z + z0
 
-            # add sphere to plot
-            f.add_trace(go.Surface(x=x_sphere, y=y_sphere, z=z_sphere, opacity=0.5, showscale=False))
+                # add sphere to plot
+                # f.add_trace(go.Surface(x=x_sphere, y=y_sphere, z=z_sphere, opacity=0.5, showscale=False))
 
-            c0 = np.asarray([x0, y0, z0])
+                c0 = np.asarray([x0, y0, z0])
 
-            xyz_fit_curve, surf_params, surf_cm, P0, xyz_plane, add_array, xyz_pd_array, xyz_point_surf, pd_pos_vec, ap_pos_vec \
+                xyz_fit_curve, fin_surf_model, surf_cm, P0, _, xyz_point_surf, pd_pos_vec, ap_pos_vec, dv_pos_vec, pca_fin \
                                                                       = fit_quadratic_surface(df, c0, pec_fin_nuclei, r)
 
-            
-            X_fit = np.reshape(xyz_fit_curve[:, 0], (P0.shape))
-            Y_fit = np.reshape(xyz_fit_curve[:, 1], (P0.shape))
-            Z_fit_curve = np.reshape(xyz_fit_curve[:, 2], (P0.shape))
+                # add fit results to df
+                df["PD_pos"] = np.nan
+                df["PD_pos"].iloc[pec_fin_nuclei] = pd_pos_vec
+                df["AP_pos"] = np.nan
+                df["AP_pos"].iloc[pec_fin_nuclei] = ap_pos_vec
+                df["DV_pos"] = np.nan
+                df["DV_pos"].iloc[pec_fin_nuclei] = dv_pos_vec.ravel()
 
-            X_fit_plane = np.reshape(xyz_plane[:, 0], (P0.shape))
-            Y_fit_plane = np.reshape(xyz_plane[:, 1], (P0.shape))
-            Z_fit_plane = np.reshape(xyz_plane[:, 2], (P0.shape))
-            
+                df["X_surf"] = np.nan
+                df["X_surf"].iloc[pec_fin_nuclei] = xyz_point_surf[:, 0]
+                df["Y_surf"] = np.nan
+                df["Y_surf"].iloc[pec_fin_nuclei] = xyz_point_surf[:, 1]
+                df["Z_surf"] = np.nan
+                df["Z_surf"].iloc[pec_fin_nuclei] = xyz_point_surf[:, 2]
+
+                xyz_fin = df[["X", "Y", "Z"]].iloc[pec_fin_nuclei].to_numpy()
+                dv_test = df["DV_pos"].iloc[pec_fin_nuclei]
+                # f = go.Figure()
+                # f.add_trace(go.Surface(x=X_fit, y=Y_fit, z=Z_fit_curve, opacity=0.75, showscale=False))
+
+                # find mid points to use as AP references
+
+                #
+                # f.add_trace(go.Surface(x=X_fit, y=Y_fit, z=Z_fit_curve_filt, opacity=0.75, showscale=False))
+                #
+                # f.add_trace(go.Mesh3d(x=xyz_fin[:, 0], y=xyz_fin[:, 1], z=xyz_fin[:, 2],
+                #                       alphahull=9,
+                #                       opacity=0.5,
+                #                       color='gray'))
+                #
+                # f.add_trace(go.Surface(x=X_fit_plane, y=Y_fit_plane, z=Z_fit_plane, opacity=0.75, showscale=False))
+                # for p in range(700, 740):
+                #     f.add_trace(go.Scatter3d(x=[xyz_fin[p, 0], xyz_point_surf[p, 0]],
+                #                              y=[xyz_fin[p, 1], xyz_point_surf[p, 1]],
+                #                              z=[xyz_fin[p, 2], xyz_point_surf[p, 2]]))
+
+                    # f.add_trace(go.Scatter3d(mode='markers', x=[xyz_fin[p, 0]],
+                    #                          y=[xyz_fin[p, 1]],
+                    #                          z=[xyz_fin[p, 2]]))
+
+                #
+                f.add_trace(go.Scatter3d(mode='markers', x=xyz_fin[:, 0], y=xyz_fin[:, 1], z=xyz_fin[:, 2],
+                                         marker=dict(color=dv_test, opacity=0.7)))
+
+                # f.add_trace(
+                #     go.Scatter3d(mode='markers', x=pd_base_xyz[:, 0], y=pd_base_xyz[:, 1], z=pd_base_xyz[:, 2],
+                #                  marker=dict(opacity=0.7)))
+
+
+                #                          mode='markers', opacity=0.6))
+
+        elif fin_surf_model:
+            print(fin_surf_model)
+            xyz_fit_curve = generate_quadratic_surface(df, fin_surf_model, pec_fin_nuclei)
+
+
+        if len(xyz_fit_curve) > 0:
+
+            sq_size = np.sqrt(xyz_fit_curve.shape[0]).astype(int)
+            X_fit = np.reshape(xyz_fit_curve[:, 0], (sq_size, sq_size))
+            Y_fit = np.reshape(xyz_fit_curve[:, 1], (sq_size, sq_size))
+            Z_fit_curve = np.reshape(xyz_fit_curve[:, 2], (sq_size, sq_size))
+
             ##########
             # filter for points inside the fin
             # keep only points that are inside the fin
             xyz_fin = df[["X", "Y", "Z"]].iloc[pec_fin_nuclei].to_numpy()
             xyz_array_norm = np.divide(xyz_fin, np.asarray([np.max(xyz_fin[:, 0]),
-                                                                 np.max(xyz_fin[:, 1]),
-                                                                 np.max(xyz_fin[:, 2])]))
+                                                            np.max(xyz_fin[:, 1]),
+                                                            np.max(xyz_fin[:, 2])]))
             # generate normalized arrays
             X_norm = X_fit / np.max(xyz_fin[:, 0])
             Y_norm = Y_fit / np.max(xyz_fin[:, 1])
@@ -1121,52 +1222,10 @@ def segment_pec_fins(dataRoot):
                                       axis=1)
 
             inside_flags = alpha_fin.contains(xyz_long)
-            inside_mat = np.reshape(inside_flags, (P0.shape))
+            inside_mat = np.reshape(inside_flags, (sq_size, sq_size))
+            Z_fit_curve[np.where(~inside_mat)] = np.nan
 
-            # Z_fit_curve_filt = Z_fit_curve
-            # Z_fit_curve_filt[np.where(~inside_mat)] = np.nan
-
-            # Find base points to use as PD references
-            sp_dist_array = np.abs(np.sqrt(np.sum((xyz_pd_array - c0)**2, axis=1)) - r)
-            # print(xyz_pd_array)
-            close_indices = np.where(sp_dist_array <= 1)[0]
-            pd_base_xyz = xyz_pd_array[close_indices]
-
-            # f = go.Figure()
-            # f.add_trace(go.Surface(x=X_fit, y=Y_fit, z=Z_fit_curve, opacity=0.75, showscale=False))
-
-            # find mid points to use as AP references
-
-            #
-            # f.add_trace(go.Surface(x=X_fit, y=Y_fit, z=Z_fit_curve_filt, opacity=0.75, showscale=False))
-            #
-            # f.add_trace(go.Mesh3d(x=xyz_fin[:, 0], y=xyz_fin[:, 1], z=xyz_fin[:, 2],
-            #                       alphahull=9,
-            #                       opacity=0.5,
-            #                       color='gray'))
-            #
-            # f.add_trace(go.Surface(x=X_fit_plane, y=Y_fit_plane, z=Z_fit_plane, opacity=0.75, showscale=False))
-            # for p in range(700, 740):
-            #     f.add_trace(go.Scatter3d(x=[xyz_fin[p, 0], xyz_point_surf[p, 0]],
-            #                              y=[xyz_fin[p, 1], xyz_point_surf[p, 1]],
-            #                              z=[xyz_fin[p, 2], xyz_point_surf[p, 2]]))
-
-                # f.add_trace(go.Scatter3d(mode='markers', x=[xyz_fin[p, 0]],
-                #                          y=[xyz_fin[p, 1]],
-                #                          z=[xyz_fin[p, 2]]))
-
-            #
-            f.add_trace(go.Scatter3d(mode='markers', x=xyz_point_surf[:, 0], y=xyz_point_surf[:, 1], z=xyz_point_surf[:, 2],
-                                     marker=dict(color=ap_pos_vec, opacity=0.7)))
-
-            f.add_trace(
-                go.Scatter3d(mode='markers', x=pd_base_xyz[:, 0], y=pd_base_xyz[:, 1], z=pd_base_xyz[:, 2],
-                             marker=dict(opacity=0.7)))
-
-
-            #                          mode='markers', opacity=0.6))
-
-
+            f.add_trace(go.Surface(x=X_fit, y=Y_fit, z=Z_fit_curve, opacity=0.75, showscale=False))
         ################
         # Plot predictions
         # f.add_trace(
@@ -1211,8 +1270,10 @@ def segment_pec_fins(dataRoot):
         #     )
         # )
 
+        # pca_fin = json.dumps(pca_fin)
+        fin_surf_model = json.dumps(fin_surf_model)
 
-        return f, class_predictions
+        return f, class_predictions, fin_surf_model
 
     @app.callback(
         Output('save-button-hidden', 'children'),
@@ -1222,12 +1283,16 @@ def segment_pec_fins(dataRoot):
             Input('fin_points', 'children'),
             Input('other_points', 'children'),
             Input('fin_tip_point', 'children'),
+            Input('fin_surf_model', 'children'),
+            # Input('pca_fin', 'children'),
             Input('dd-output-container', 'children')])
 
-    def clicks(n_clicks, class_predictions, base_points, fin_points, other_points, fin_tip_point, fileName):
+    def clicks(n_clicks, class_predictions, base_points, fin_points, other_points,
+                                                                    fin_tip_point, fin_surf_model, fileName):
         changed_id = [p['prop_id'] for p in dash.callback_context.triggered][0]
 
         if 'save-button' in changed_id:
+            print(fin_surf_model)
             # save
             df_dict = load_nucleus_dataset(fileName)
             df = df_dict["df"]
@@ -1252,6 +1317,14 @@ def segment_pec_fins(dataRoot):
             write_file5 = dataRoot + fileName + '_curation_info/fin_tip_point.pkl'
             with open(write_file5, 'wb') as wf:
                 pickle.dump(fin_tip_point, wf)
+
+            write_file6 = dataRoot + fileName + '_curation_info/fin_surf_model.pkl'
+            with open(write_file6, 'wb') as wf:
+                pickle.dump(fin_surf_model, wf)
+
+            # write_file7 = dataRoot + fileName + '_curation_info/pca_fin.pkl'
+            # with open(write_file7, 'wb') as wf:
+            #     pickle.dump(pca_fin, wf)
 
             # save
             # model_file = dataRoot + 'model.sav'
