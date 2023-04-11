@@ -17,7 +17,6 @@ from sklearn.decomposition import PCA
 import open3d as o3d
 from pyntcloud import PyntCloud
 from sklearn.cluster import KMeans
-from skimage.measure import regionprops
 import itertools
 from scipy.spatial import distance_matrix
 from sklearn.neighbors import KDTree
@@ -27,15 +26,67 @@ import os
 import networkx as nx
 import math
 import scipy
-from astropy.coordinates import cartesian_to_spherical
-
-from sklearn.preprocessing import PolynomialFeatures
-from sklearn.linear_model import LogisticRegression
+from scipy.optimize import fsolve
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import classification_report, confusion_matrix
-import dash_daq as daq
 from itertools import product
 
+# helper function for calculating minimum distance between point and surface
+def definite_integral(FDECAB, m, b, s):
+    F, D, E, C, A, B = FDECAB
+    integralVal = ((D + E*m + b*(C + 2*B*m) + 2*(A + m*(C + B*m))*s)*
+                    np.sqrt(1 + m**2 + (D + E*m + b*(C + 2*B*m) + 2*(A + m*(C + B*m))*s)**2) +
+                    (1 + m**2)*np.arctanh((D + E*m + b*(C + 2*B*m) + 2*(A + m*(C + B*m))*s)/
+                    np.sqrt(1 + m**2 + (D + E*m + b*(C + 2*B*m) + 2*(A + m*(C + B*m))*s)**2)))/(4.*(A + m*(C + B*m)))
+
+    return integralVal
+
+def calculate_path_distance(FDECAB, p0, p1):
+    # F, D, E, C, A, B = FDECAB
+    dx = p0[0] - p1[0]
+    dy = p0[1] - p1[1]
+    m = dy/dx
+    b = p0[1] - m*p0[0]
+
+    v0 = definite_integral(FDECAB, m, b, p0[0])
+    v1 = definite_integral(FDECAB, m, b, p1[0])
+
+    return v1-v0
+
+
+
+
+def calculate_tangent_plane2(DECA, base_point, sphere_point):
+    D, E, C, A = DECA
+
+    xb, yb, zb = base_point
+    xs, ys, zs = sphere_point
+
+    # calculate two components of normal
+    a = 2 * A*xb + C*yb + D
+    c = -1
+
+    # solve for third
+    b = (a*(-xb+xs) + c*(-zb+zs))/(yb-ys) # solution for b that forces plane to pass through both points
+    B = (b-C*xb-E)/(2*yb) # B for quadratic surface such that its tangent plane at bp passes through sp
+
+    plane_vec_norm = np.asarray([a, b, c])
+    plane_vec_norm = plane_vec_norm / np.sqrt(np.sum(plane_vec_norm ** 2))
+    # calculate D
+    D = -np.dot(plane_vec_norm, base_point)
+
+    return plane_vec_norm, D, B
+
+def calculate_tangent_plane(C_full, point):
+    F, D, E, C, A, B = C_full
+    dfdx = 2 * A * point[0] + C * point[1] + D
+    dfdy = 2 * B * point[1] + C * point[0] + E
+    dfdz = -1
+    plane_vec_norm = np.asarray([dfdx, dfdy, dfdz])
+    plane_vec_norm = plane_vec_norm / np.sqrt(np.sum(plane_vec_norm ** 2))
+    # calculate D
+    D = -np.dot(plane_vec_norm, point)
+
+    return (plane_vec_norm, D)
 
 # Helper function to calculate F in surface equation given a point that the surface must pass through
 def solve_for_f(C_fit, cp):
@@ -47,13 +98,29 @@ def solve_for_f(C_fit, cp):
     C_out = [C0, C_fit[0], C_fit[1], C_fit[2], C_fit[3], C_fit[4]]
     return C_out
 
+def predict_quadratic_surface2(xy, DECA, base_point, sphere_point):
+
+    # first, solve for B given constraint that tangent plane must pass thrhoug sphere center
+    plane_vec_norm, D, B = calculate_tangent_plane2(DECA, base_point, sphere_point)
+    DECAB = [DECA[0], DECA[1], DECA[2], DECA[3], B]
+
+    # then solve for F
+    C_full = solve_for_f(DECAB, base_point)
+
+    # predict surface
+    A = np.c_[np.ones(xy.shape[0]), xy, np.prod(xy, axis=1), xy**2]
+    surf_pd = np.dot(A, C_full).ravel()
+    xyz_out = np.concatenate((xy, np.reshape(surf_pd, (xy.shape[0], 1))), axis=1)
+
+    return xyz_out, C_full, plane_vec_norm, D
+
 def predict_quadratic_surface(xy, DECAB, point):
     C_full = solve_for_f(DECAB, point)
     A = np.c_[np.ones(xy.shape[0]), xy, np.prod(xy, axis=1), xy**2]
     surf_pd = np.dot(A, C_full).ravel()
     xyz_out = np.concatenate((xy, np.reshape(surf_pd, (xy.shape[0], 1))), axis=1)
 
-    return xyz_out
+    return xyz_out, C_full
 def fit_quadratic_surface(df, c0, pec_fin_nuclei, r):
     # fit corresponding plane
     # get nn distances
@@ -65,6 +132,7 @@ def fit_quadratic_surface(df, c0, pec_fin_nuclei, r):
     # find average distance to kth closest neighbor
     mean_nn_dist_vec = np.mean(nearest_dist, axis=0)
     nn_thresh = mean_nn_dist_vec[k_nn]
+    nn_thresh_small = mean_nn_dist_vec[1]
 
     # find pec fin nuclei that are near the sphere surface
     xyz_fin = df[["X", "Y", "Z"]].iloc[pec_fin_nuclei].to_numpy()
@@ -86,6 +154,18 @@ def fit_quadratic_surface(df, c0, pec_fin_nuclei, r):
     plane_normal = np.cross(vec1, vec2)
     plane_normal_u = plane_normal / np.sqrt(np.sum(plane_normal ** 2))
     D_plane = -np.dot(plane_normal, surf_cm)
+
+    # generate additional points
+    c_vec = surf_cm - c0
+    c_vec_u = c_vec / np.sqrt(np.sum(c_vec ** 2))
+    lower_point = surf_cm - 2*c_vec_u*nn_thresh_small
+    n_reps = 6
+    add_array = np.empty((n_reps*n_reps+1, 3))
+    add_array[0, :] = lower_point
+    for n in range(n_reps):
+        ind = 2*n
+        add_array[ind+1, :] = lower_point + nn_thresh*vec1*(n+1)
+        add_array[ind+2:, :] = lower_point - nn_thresh*vec1*(n+1)
 
     #######################
     # fit surface to fin points
@@ -117,6 +197,8 @@ def fit_quadratic_surface(df, c0, pec_fin_nuclei, r):
     pca = PCA(n_components=3)
     pca.fit(xyz_fin_down)
     pca_fin_raw = pca.transform(xyz_fin_down)
+    pca_add_array = pca.transform(add_array)
+    pca_fin_surf = pca.transform(xyz_surf)
 
     # use kmeans to find key points
     n_clusters = 100
@@ -126,10 +208,15 @@ def fit_quadratic_surface(df, c0, pec_fin_nuclei, r):
     for n in range(n_clusters):
         k_indices = np.where(k_labels == n)[0]
         pca_fin[n, :] = np.mean(pca_fin_raw[k_indices, :], axis=0)
+
+    pca_fin = np.concatenate((pca_fin, pca_add_array), axis=0)
     # pca_fin = kmeans.cluster_centers_
 
     pca_surf_cm = pca.transform(np.reshape(surf_cm, (1, 3)))
     pca_surf_cm = pca_surf_cm.ravel()
+
+    pca_c0 = pca.transform(np.reshape(c0, (1, 3)))
+    pca_c0 = pca_c0.ravel()
     
     # print(pca_surf_cm)
     # generate grid to be used for surface generation
@@ -147,17 +234,49 @@ def fit_quadratic_surface(df, c0, pec_fin_nuclei, r):
 
     xy2 = np.concatenate((PP0[:, np.newaxis], PP1[:, np.newaxis]), axis=1)
     def l2_fit_loss_point_euc(C_prop, xyz_fin=pca_fin, xy=xy2, cp=pca_surf_cm):
-        xyz_pd = predict_quadratic_surface(xy, C_prop, cp)
+        xyz_pd, C0_full = predict_quadratic_surface(xy, C_prop, cp)
         dist_array = distance_matrix(xyz_fin, xyz_pd)
         residuals = np.min(dist_array, axis=1)
         return residuals
+
+    def l2_fit_loss_plane_euc(C_prop, xyz_fin=pca_fin, xy=xy2, cp=pca_surf_cm, sp=pca_c0):
+        xyz_pd, C0_full, _, _ = predict_quadratic_surface2(xy, C_prop, cp, sp)
+        dist_array = distance_matrix(xyz_fin, xyz_pd)
+        residuals = np.min(dist_array, axis=1)
+        return residuals
+
+    # def l2_fit_loss_point_euc(C_prop, xyz_fin=pca_fin, xy=xy2, cp=pca_surf_cm):
+    #     xyz_pd, C_full = predict_quadratic_surface(xy, C_prop, cp)
+    #
+    #     residuals = np.empty((xyz_fin.shape[0], 1))
+    #     for d in range(residuals.shape[0]):
+    #         def lagrange_equations(P, C0=C_full, P0=xyz_fin[d, :]):
+    #             x, y, z, L = P  # varibles to solve for
+    #             x0, y0, z0 = P0  # coordinates of point (known)
+    #             F, D, E, C, A, B = C0  # curve parameters (known)
+    #
+    #             # dfdx
+    #             dfdx = D * L + 2 * (1 + A * L) * x - 2 * x0 + C * L * y
+    #             # dfdy
+    #             dfdy = E * L + C * L * x + 2 * (y + B * L * y - y0)
+    #             # dfdz
+    #             dfdz = 2 * z - 2 * z0 - L
+    #             # dfdL
+    #             dfdl = F + D * x + A * x ** 2 + y * (E + C * x + B * y) - z
+    #
+    #             return (dfdx, dfdy, dfdz, dfdl)
+    #
+    #         x, y, z, _ = fsolve(lagrange_equations, np.asarray([100, 100, 100, 1]))
+    #         residuals[d] = np.sqrt((x-xyz_fin[d, 0])**2 + (y-xyz_fin[d, 1])**2 + (z-xyz_fin[d, 2])**2)
+    #
+    #     return residuals.flatten()
 
     c0 = [-3, 0.01, 0.015, 0.001, 0.005, 0.01]
     c_fit = scipy.optimize.least_squares(l2_fit_loss_point_euc, c0[1:])
     C_fit = c_fit.x
 
     C = solve_for_f(C_fit, pca_surf_cm)
-
+    # xyz_pd, C, normal_vec, D = predict_quadratic_surface2(xy2, C_fit, pca_surf_cm, pca_c0)
     PP2_curve = np.dot(np.c_[np.ones(PP0.shape), PP0, PP1, PP0 * PP1, PP0 ** 2, PP1 ** 2], C).reshape(P0.shape)
 
     xyz_fit_curve = pca.inverse_transform(np.concatenate((np.reshape(P0, (P0.size, 1)),
@@ -166,7 +285,91 @@ def fit_quadratic_surface(df, c0, pec_fin_nuclei, r):
                                                          axis=1)
                                           )
 
-    return xyz_fit_curve, C, surf_cm, P0
+    normal_vec, D = calculate_tangent_plane(C, pca_surf_cm)
+    plane_pd = -(normal_vec[0] * P0 + normal_vec[1] * P1 + D) / normal_vec[2]
+
+
+    # f = go.Figure(data=[go.Surface(x=P0, y=P1, z=plane_pd, opacity=0.75, showscale=False)])
+    # f.add_trace(go.Surface(x=P0, y=P1, z=PP2_curve, opacity=0.75, showscale=False))
+    # f.add_trace(go.Scatter3d(x=[pca_surf_cm[0]], y=[pca_surf_cm[1]], z=[pca_surf_cm[2]], opacity=0.75))
+    # f.show()
+    xyz_plane = pca.inverse_transform(np.concatenate((np.reshape(P0, (P0.size, 1)),
+                                                      np.reshape(P1, (P1.size, 1)),
+                                                      np.reshape(plane_pd, (plane_pd.size, 1))),
+                                                      axis=1)
+                                      )
+    # f = go.Figure()
+    # f.add_trace(go.Scatter3d(x=xyz_plane[:, 0], y=xyz_plane[:, 1], z=xyz_plane[:, 2], opacity=0.75))
+    # f.show()
+
+    ##########
+    # Define a plane that can serve to dictate AP position
+
+    # first vector is just the normal to the tangent vector
+    ap_vec1 = normal_vec
+    ap_vec1 = ap_vec1 / np.sqrt(np.sum(ap_vec1 ** 2))
+    # second in vector from surf centroid to most distant point
+    dist_vec = np.sqrt(np.sum((pca_fin_raw - pca_surf_cm)**2, axis=1))
+    dist_vec[surf_indices] = np.inf
+    farthest_ind = np.argmax(dist_vec)
+    far_point = pca_fin_raw[farthest_ind]
+    ap_vec2 = pca_surf_cm - pca_c0# calculate_tangent_plane(C, far_point)
+    ap_vec2 = ap_vec2 / np.sqrt(np.sum(ap_vec2**2))
+    # ap_plane_normal_vec = pca_ap.components_[0]
+    ap_plane_u = np.cross(ap_vec2, ap_vec1)
+    ap_plane_u = ap_plane_u / np.sqrt(np.sum(ap_plane_u**2))
+    d_ap = -np.dot(ap_plane_u, pca_surf_cm)
+
+    # find nuclei close to plane and use these to generate a sampling grid
+    pca_fin_array = pca_fin_raw
+    d_ap_surf = np.abs(np.sum(np.multiply(ap_plane_u, pca_fin_array), axis=1) + d_ap)
+    close_indices = np.where(d_ap_surf <= nn_thresh)[0]
+    ap_points = pca_fin_array[close_indices]
+
+    grid_res = 100
+    P0AP, P1AP = np.meshgrid(np.linspace(np.min(ap_points[:, 0]), np.max(ap_points[:, 0]), grid_res),
+                             np.linspace(np.min(ap_points[:, 1]), np.max(ap_points[:, 1]), grid_res))
+    PP0AP = P0AP.flatten()
+    PP1AP = P1AP.flatten()
+    P2AP = np.dot(np.c_[np.ones(PP0.shape), PP0, PP1, PP0 * PP1, PP0 ** 2, PP1 ** 2], C).reshape(P0.shape)
+    PP2AP = P2AP.flatten()
+
+    ap_pd_array = np.concatenate((PP0[:, np.newaxis], PP1[:, np.newaxis], PP2AP[:, np.newaxis]), axis=1)
+    d_ap_surf2 = np.abs(np.sum(np.multiply(ap_plane_u, ap_pd_array), axis=1) + d_ap)
+    # print(xyz_pd_array)
+    close_indices = np.where(d_ap_surf2 <= 1)[0]
+    xyz_ap_array = pca.inverse_transform(ap_pd_array[close_indices])
+    # def find_intersection_point(FDECAB, ap_normal, d, x):
+    #     F, D, E, C, A, B = FDECAB
+    #     a, b, c = ap_normal
+    #
+    #     # calculate y
+    #     y0 = (-b - c*E - c*C*x - np.sqrt((b + c*E + c*C*x)**2 - 4*B*c*(d + c*F + a*x + c*D*x + A*c*x**2))) / (2*B*c)
+    #     y1 = (-b - c * E - c * C * x + np.sqrt(
+    #         (b + c * E + c * C * x) ** 2 - 4 * B * c * (d + c * F + a * x + c * D * x + A * c * x ** 2))) / (2*B*c)
+    #
+    #     # calculate z
+    #     z0 = (-d - a*x - b*y0)/c
+    #     z1 = (-d - a*x - b*y1)/c
+    #
+    #     # generate arrays to return
+
+
+    ##########
+    # sample points that fall approximately at the intersection of sphere and surface
+    grid_res = 100
+    P0B, P1B = np.meshgrid(np.linspace(np.min(pca_fin_surf[:, 0]), np.max(pca_fin_surf[:, 0]), grid_res),
+                           np.linspace(np.min(pca_fin_surf[:, 1]), np.max(pca_fin_surf[:, 1]), grid_res))
+    PP0B = P0B.flatten()
+    PP1B = P1B.flatten()
+    P2B = np.dot(np.c_[np.ones(PP0B.shape), PP0B, PP1B, PP0B * PP1B, PP0B ** 2, PP1B ** 2], C).reshape(P0B.shape)
+    PP2B = P2B.flatten()
+
+    xyz_pd_array = pca.inverse_transform(
+                                np.concatenate((PP0B[:, np.newaxis], PP1B[:, np.newaxis], PP2B[:, np.newaxis]), axis=1)
+    )
+
+    return xyz_fit_curve, C, surf_cm, P0, xyz_plane, add_array, xyz_pd_array, xyz_ap_array
 
 def cart_to_sphere(xyz):
     ptsnew = np.zeros(xyz.shape)
@@ -840,16 +1043,21 @@ def segment_pec_fins(dataRoot):
             z_sphere = z + z0
 
             # add sphere to plot
-            # f.add_trace(go.Surface(x=x_sphere, y=y_sphere, z=z_sphere, opacity=0.5, showscale=False))
+            f.add_trace(go.Surface(x=x_sphere, y=y_sphere, z=z_sphere, opacity=0.5, showscale=False))
 
             c0 = np.asarray([x0, y0, z0])
 
-            xyz_fit_curve, surf_params, surf_cm, P0 = fit_quadratic_surface(df, c0, pec_fin_nuclei, r)
+            xyz_fit_curve, surf_params, surf_cm, P0, xyz_plane, add_array, xyz_pd_array, xyz_ap_array\
+                                                                      = fit_quadratic_surface(df, c0, pec_fin_nuclei, r)
 
             
             X_fit = np.reshape(xyz_fit_curve[:, 0], (P0.shape))
             Y_fit = np.reshape(xyz_fit_curve[:, 1], (P0.shape))
             Z_fit_curve = np.reshape(xyz_fit_curve[:, 2], (P0.shape))
+
+            X_fit_plane = np.reshape(xyz_plane[:, 0], (P0.shape))
+            Y_fit_plane = np.reshape(xyz_plane[:, 1], (P0.shape))
+            Z_fit_plane = np.reshape(xyz_plane[:, 2], (P0.shape))
             
             ##########
             # filter for points inside the fin
@@ -875,18 +1083,34 @@ def segment_pec_fins(dataRoot):
 
             Z_fit_curve_filt = Z_fit_curve
             Z_fit_curve_filt[np.where(~inside_mat)] = np.nan
-            ##########
 
-            f = go.Figure(data=[go.Surface(x=X_fit, y=Y_fit, z=Z_fit_curve_filt, opacity=0.75, showscale=False)])
-            f.add_trace(go.Scatter3d(mode='markers', x=[surf_cm[0]], y=[surf_cm[1]], z=[surf_cm[2]]))
+            # Find base points to use as PD references
+            sp_dist_array = np.abs(np.sqrt(np.sum((xyz_pd_array - c0)**2, axis=1)) - r)
+            # print(xyz_pd_array)
+            close_indices = np.where(sp_dist_array <= 1)[0]
+            pd_base_xyz = xyz_pd_array[close_indices]
 
-            f.add_trace(go.Mesh3d(x=xyz_fin[:, 0], y=xyz_fin[:, 1], z=xyz_fin[:, 2],
-                                    alphahull=9,
-                                    opacity=0.5,
-                                    color='gray'))
+            f.add_trace(go.Surface(x=X_fit, y=Y_fit, z=Z_fit_curve_filt, opacity=0.75, showscale=False))
 
-            # f.add_trace(go.Scatter3d(x=xyz_fin_down[:, 0], y=xyz_fin_down[:, 1], z=xyz_fin_down[:, 2],
+            # find mid points to use as AP references
+
+            #
+            # f.add_trace(go.Surface(x=X_fit, y=Y_fit, z=Z_fit_curve_filt, opacity=0.75, showscale=False))
+            #
+            # f.add_trace(go.Mesh3d(x=xyz_fin[:, 0], y=xyz_fin[:, 1], z=xyz_fin[:, 2],
+            #                       alphahull=9,
+            #                       opacity=0.5,
+            #                       color='gray'))
+            #
+            f.add_trace(go.Surface(x=X_fit_plane, y=Y_fit_plane, z=Z_fit_plane, opacity=0.75, showscale=False))
+            f.add_trace(go.Scatter3d(mode='markers', x=pd_base_xyz[:, 0], y=pd_base_xyz[:, 1], z=pd_base_xyz[:, 2]))
+            f.add_trace(go.Scatter3d(mode='markers', x=xyz_ap_array[:, 0], y=xyz_ap_array[:, 1], z=xyz_ap_array[:, 2]))
+            #
+            # f.add_trace(go.Scatter3d(mode='markers', x=add_array[:, 0], y=add_array[:, 1], z=add_array[:, 2]))
+
             #                          mode='markers', opacity=0.6))
+
+
         ################
         # Plot predictions
         # f.add_trace(
@@ -897,12 +1121,12 @@ def segment_pec_fins(dataRoot):
         #         z=[df["Z"].iloc[p] for p in pec_fin_nuclei],
         #         marker=dict(
         #             color='lightgreen',
-        #             opacity=0.5,
+        #             opacity=0.1,
         #             size=5),
         #         showlegend=False
         #     )
         # )
-
+        #
         # f.add_trace(
         #     go.Scatter3d(
         #         mode='markers',
@@ -911,7 +1135,7 @@ def segment_pec_fins(dataRoot):
         #         z=[df["Z"].iloc[p] for p in base_nuclei],
         #         marker=dict(
         #             color='coral',
-        #             opacity=0.5,
+        #             opacity=0.1,
         #             size=5),
         #         showlegend=False
         #     )
@@ -925,7 +1149,7 @@ def segment_pec_fins(dataRoot):
         #         z=[df["Z"].iloc[p] for p in other_nuclei],
         #         marker=dict(
         #             color='azure',
-        #             opacity=0.5,
+        #             opacity=0.1,
         #             size=5),
         #         showlegend=False
         #     )
