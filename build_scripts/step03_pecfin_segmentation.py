@@ -223,7 +223,7 @@ def fit_quadratic_surface(df, c0, pec_fin_nuclei, r, k_nn=7):
 
     # Transform to PCA space
     PCAFIN = PCA(n_components=3)
-    PCAFIN.fit(xyz_fin_raw.to_numpy())
+    PCAFIN.fit(xyz_fin_down)
     pca_fin_full = PCAFIN.transform(xyz_fin_raw.to_numpy())
     pca_fin_raw = PCAFIN.transform(xyz_fin_down)
     pca_fin_add_array = PCAFIN.transform(add_array)
@@ -247,7 +247,7 @@ def fit_quadratic_surface(df, c0, pec_fin_nuclei, r, k_nn=7):
     pca_fin_c0 = pca_fin_c0.ravel()
 
     # generate reference grid for use during the fit procedure
-    grid_res = 100
+    grid_res = 50
     P0, P1 = np.meshgrid(np.linspace(np.min(pca_fin_raw[:, 0]), np.max(pca_fin_raw[:, 0]), grid_res),
                          np.linspace(np.min(pca_fin_raw[:, 1]), np.max(pca_fin_raw[:, 1]), grid_res))
 
@@ -279,7 +279,7 @@ def fit_quadratic_surface(df, c0, pec_fin_nuclei, r, k_nn=7):
     P2_curve = np.dot(np.c_[np.ones(PP0.shape), PP0, PP1, PP0 * PP1, PP0 ** 2, PP1 ** 2], C_out).reshape(P0.shape)
 
     xyz_fit_curve = PCAFIN.inverse_transform(np.concatenate((np.reshape(P0, (P0.size, 1)),
-                                                          np.reshape(P1, (P1.size, 1)),
+                                                             np.reshape(P1, (P1.size, 1)),
                                                           np.reshape(P2_curve, (P2_curve.size, 1))),
                                                          axis=1)
                                           )
@@ -384,7 +384,7 @@ def fit_quadratic_surface(df, c0, pec_fin_nuclei, r, k_nn=7):
     pd_i = pd_i.astype(int)
     ap_pos = ap_pos_base[pd_i] 
     
-    return xyz_fit_curve, C_out, surf_cm, P0, xyz_pd_array, xyz_point_surf, pd_pos, ap_pos, dv_dist_vec, PCAFIN
+    return xyz_fit_curve, C_out, surf_cm, P0, xyz_pd_array, xyz_point_surf, pd_pos, ap_pos, dv_dist_vec, PCAFIN.components_
 
 
 def generate_quadratic_surface(df, surface_model, pec_fin_nuclei):
@@ -650,7 +650,7 @@ def segment_pec_fins(dataRoot):
         if os.path.isfile(propPath):
             df = pd.read_csv(propPath, index_col=0)
             # clean up columns
-            # df = df[df.columns.drop(list(df.filter(regex='Unnamed')))]
+            df.drop(list(df.filter(regex='Unnamed')), axis=1, inplace=True)
             # print(df.head(1))
         else:
             raise Exception(
@@ -758,7 +758,8 @@ def segment_pec_fins(dataRoot):
     app.layout = html.Div([
                         html.Button('Clear Selection', id='clear'),
                         html.Button('Save', id='save-button'),
-                        html.Button('Calculate Fit', id='calc-button'),
+                        html.Button('Fit Random Forest', id='calc-button'),
+                        html.Button('Fit Fin Surface', id='fin-calc-button'),
                         html.P(id='save-button-hidden', style={'display': 'none'}),
                         dcc.Graph(id='3d_scat', figure=f),
                         html.Div(id='df_list', hidden=True),
@@ -766,9 +767,10 @@ def segment_pec_fins(dataRoot):
                         html.Div(id='base_points', hidden=True),
                         html.Div(id='fin_points', hidden=True),
                         html.Div(id='fin_tip_point', hidden=True),
-                        # html.Div(id='pca_fin', hidden=True),
+                        html.Div(id='pca_fin', hidden=True),
                         html.Div(id='fin_surf_model', hidden=True),
                         html.Div(id='pfin_nuclei', hidden=True),
+                        html.Div(id='surf_fit_dict', hidden=True),
                       
                         html.Div([
                             dcc.Dropdown(imNameList, imNameList[0], id='dataset-dropdown'),
@@ -926,17 +928,21 @@ def segment_pec_fins(dataRoot):
 
     @app.callback([Output('3d_scat', 'figure'),
                    Output('pfin_nuclei', 'children'),
-                   Output('fin_surf_model', 'children')],
+                   Output('fin_surf_model', 'children'),
+                   Output('pca_fin', 'children'),
+                   Output('surf_fit_dict', 'children')],
                 [Input('pfin_nuclei', 'children'),
                  Input('base_points', 'children'),
                  Input('other_points', 'children'),
                  Input('fin_points', 'children'),
                  Input('fin_tip_point', 'children'),
                  Input('calc-button', 'n_clicks'),
+                 Input('fin-calc-button', 'n_clicks'),
                  Input('dd-output-container', 'children')],
                    [State('fin_surf_model', 'children')])
 
-    def chart_3d(class_predictions_in, base_points, other_points, fin_points, fin_tip_point, n_clicks, fileName, fin_surf_model):
+    def chart_3d(class_predictions_in, base_points, other_points, fin_points, fin_tip_point,
+                 n_clicks, n_licks_fin, fileName, fin_surf_model):
 
         global f
 
@@ -970,15 +976,6 @@ def segment_pec_fins(dataRoot):
         if ('clear' in changed_id):
             fin_surf_model = []
             # pca_fin = []
-        # # calculate axis limits
-        # xmin = np.min(df["X"].iloc[:]) + 5
-        # xmax = np.max(df["X"].iloc[:]) - 5
-        # 
-        # ymin = np.min(df["Y"].iloc[:]) - 5
-        # ymax = np.max(df["Y"].iloc[:]) + 5
-        # 
-        # zmin = np.min(df["Z"].iloc[:]) - 3
-        # zmax = np.max(df["Z"].iloc[:]) + 3
 
         class_predictions_curr = df_dict["class_predictions_curr"]
 
@@ -1110,13 +1107,14 @@ def segment_pec_fins(dataRoot):
 
         pec_fin_nuclei = np.where(np.asarray(class_predictions) == 2)[0]
         base_nuclei = np.where(np.asarray(class_predictions) == 1)[0]
-        # other_nuclei = np.where(np.asarray(class_predictions) == 0)[0]
+        other_nuclei = np.where(np.asarray(class_predictions) == 0)[0]
 
         xyz_fit_curve = []
-        print(fin_surf_model)
+        surf_fit_dict = {}
+        pca_fin = np.asarray([])
         # fin_surf_model = json.loads(fin_surf_model)
         # pca_fin = json.loads(pca_fin)
-        if 'calc-button' in changed_id:
+        if 'fin-calc-button' in changed_id:
             if (len(base_nuclei) > 0) and (len(pec_fin_nuclei) > 0):
                 # fit sphere
                 xyz_base = df[["X", "Y", "Z"]].iloc[base_nuclei]
@@ -1138,62 +1136,58 @@ def segment_pec_fins(dataRoot):
 
                 xyz_fit_curve, fin_surf_model, surf_cm, P0, _, xyz_point_surf, pd_pos_vec, ap_pos_vec, dv_pos_vec, pca_fin \
                                                                       = fit_quadratic_surface(df, c0, pec_fin_nuclei, r)
-
-                # add fit results to df
-                df["PD_pos"] = np.nan
-                df["PD_pos"].iloc[pec_fin_nuclei] = pd_pos_vec
-                df["AP_pos"] = np.nan
-                df["AP_pos"].iloc[pec_fin_nuclei] = ap_pos_vec
-                df["DV_pos"] = np.nan
-                df["DV_pos"].iloc[pec_fin_nuclei] = dv_pos_vec.ravel()
-
-                df["X_surf"] = np.nan
-                df["X_surf"].iloc[pec_fin_nuclei] = xyz_point_surf[:, 0]
-                df["Y_surf"] = np.nan
-                df["Y_surf"].iloc[pec_fin_nuclei] = xyz_point_surf[:, 1]
-                df["Z_surf"] = np.nan
-                df["Z_surf"].iloc[pec_fin_nuclei] = xyz_point_surf[:, 2]
-
-                xyz_fin = df[["X", "Y", "Z"]].iloc[pec_fin_nuclei].to_numpy()
-                dv_test = df["DV_pos"].iloc[pec_fin_nuclei]
-                # f = go.Figure()
-                # f.add_trace(go.Surface(x=X_fit, y=Y_fit, z=Z_fit_curve, opacity=0.75, showscale=False))
-
-                # find mid points to use as AP references
-
-                #
-                # f.add_trace(go.Surface(x=X_fit, y=Y_fit, z=Z_fit_curve_filt, opacity=0.75, showscale=False))
-                #
-                # f.add_trace(go.Mesh3d(x=xyz_fin[:, 0], y=xyz_fin[:, 1], z=xyz_fin[:, 2],
-                #                       alphahull=9,
-                #                       opacity=0.5,
-                #                       color='gray'))
-                #
-                # f.add_trace(go.Surface(x=X_fit_plane, y=Y_fit_plane, z=Z_fit_plane, opacity=0.75, showscale=False))
-                # for p in range(700, 740):
-                #     f.add_trace(go.Scatter3d(x=[xyz_fin[p, 0], xyz_point_surf[p, 0]],
-                #                              y=[xyz_fin[p, 1], xyz_point_surf[p, 1]],
-                #                              z=[xyz_fin[p, 2], xyz_point_surf[p, 2]]))
-
-                    # f.add_trace(go.Scatter3d(mode='markers', x=[xyz_fin[p, 0]],
-                    #                          y=[xyz_fin[p, 1]],
-                    #                          z=[xyz_fin[p, 2]]))
-
-                #
-                f.add_trace(go.Scatter3d(mode='markers', x=xyz_fin[:, 0], y=xyz_fin[:, 1], z=xyz_fin[:, 2],
-                                         marker=dict(color=dv_test, opacity=0.7)))
-
-                # f.add_trace(
-                #     go.Scatter3d(mode='markers', x=pd_base_xyz[:, 0], y=pd_base_xyz[:, 1], z=pd_base_xyz[:, 2],
-                #                  marker=dict(opacity=0.7)))
-
-
-                #                          mode='markers', opacity=0.6))
+                dv_pos_vec = dv_pos_vec.ravel()
+                surf_fit_dict = {"PD_pos": pd_pos_vec.tolist(), "DV_pos": dv_pos_vec.tolist(),
+                                 "AP_pos": ap_pos_vec.tolist(), "xyz_surf": xyz_point_surf.tolist()}
 
         elif fin_surf_model:
-            print(fin_surf_model)
-            xyz_fit_curve = generate_quadratic_surface(df, fin_surf_model, pec_fin_nuclei)
+            if len(pec_fin_nuclei) > 0:
+                xyz_fit_curve = generate_quadratic_surface(df, fin_surf_model, pec_fin_nuclei)
 
+
+        ################
+        # Plot predictions
+        f.add_trace(
+            go.Scatter3d(
+                mode='markers',
+                x=[df["X"].iloc[p] for p in pec_fin_nuclei],
+                y=[df["Y"].iloc[p] for p in pec_fin_nuclei],
+                z=[df["Z"].iloc[p] for p in pec_fin_nuclei],
+                marker=dict(
+                    color='lightgreen',
+                    opacity=0.25,
+                    size=5),
+                showlegend=False
+            )
+        )
+
+        f.add_trace(
+            go.Scatter3d(
+                mode='markers',
+                x=[df["X"].iloc[p] for p in base_nuclei],
+                y=[df["Y"].iloc[p] for p in base_nuclei],
+                z=[df["Z"].iloc[p] for p in base_nuclei],
+                marker=dict(
+                    color='coral',
+                    opacity=0.5,
+                    size=5),
+                showlegend=False
+            )
+        )
+
+        f.add_trace(
+            go.Scatter3d(
+                mode='markers',
+                x=[df["X"].iloc[p] for p in other_nuclei],
+                y=[df["Y"].iloc[p] for p in other_nuclei],
+                z=[df["Z"].iloc[p] for p in other_nuclei],
+                marker=dict(
+                    color='azure',
+                    opacity=0.5,
+                    size=5),
+                showlegend=False
+            )
+        )
 
         if len(xyz_fit_curve) > 0:
 
@@ -1226,54 +1220,15 @@ def segment_pec_fins(dataRoot):
             Z_fit_curve[np.where(~inside_mat)] = np.nan
 
             f.add_trace(go.Surface(x=X_fit, y=Y_fit, z=Z_fit_curve, opacity=0.75, showscale=False))
-        ################
-        # Plot predictions
-        # f.add_trace(
-        #     go.Scatter3d(
-        #         mode='markers',
-        #         x=[df["X"].iloc[p] for p in pec_fin_nuclei],
-        #         y=[df["Y"].iloc[p] for p in pec_fin_nuclei],
-        #         z=[df["Z"].iloc[p] for p in pec_fin_nuclei],
-        #         marker=dict(
-        #             color='lightgreen',
-        #             opacity=0.1,
-        #             size=5),
-        #         showlegend=False
-        #     )
-        # )
-        #
-        # f.add_trace(
-        #     go.Scatter3d(
-        #         mode='markers',
-        #         x=[df["X"].iloc[p] for p in base_nuclei],
-        #         y=[df["Y"].iloc[p] for p in base_nuclei],
-        #         z=[df["Z"].iloc[p] for p in base_nuclei],
-        #         marker=dict(
-        #             color='coral',
-        #             opacity=0.1,
-        #             size=5),
-        #         showlegend=False
-        #     )
-        # )
-        #
-        # f.add_trace(
-        #     go.Scatter3d(
-        #         mode='markers',
-        #         x=[df["X"].iloc[p] for p in other_nuclei],
-        #         y=[df["Y"].iloc[p] for p in other_nuclei],
-        #         z=[df["Z"].iloc[p] for p in other_nuclei],
-        #         marker=dict(
-        #             color='azure',
-        #             opacity=0.1,
-        #             size=5),
-        #         showlegend=False
-        #     )
-        # )
 
         # pca_fin = json.dumps(pca_fin)
+        pca_fin = json.dumps(pca_fin.tolist())
         fin_surf_model = json.dumps(fin_surf_model)
+        surf_fit_dict = json.dumps(surf_fit_dict)
+        class_predictions = np.asarray(class_predictions)
+        class_predictions = json.dumps(class_predictions.tolist())
 
-        return f, class_predictions, fin_surf_model
+        return f, class_predictions, fin_surf_model, pca_fin, surf_fit_dict
 
     @app.callback(
         Output('save-button-hidden', 'children'),
@@ -1284,24 +1239,51 @@ def segment_pec_fins(dataRoot):
             Input('other_points', 'children'),
             Input('fin_tip_point', 'children'),
             Input('fin_surf_model', 'children'),
-            # Input('pca_fin', 'children'),
+            Input('surf_fit_dict', 'children'),
+            Input('pca_fin', 'children'),
             Input('dd-output-container', 'children')])
 
     def clicks(n_clicks, class_predictions, base_points, fin_points, other_points,
-                                                                    fin_tip_point, fin_surf_model, fileName):
+                                                                fin_tip_point, fin_surf_model, surf_fit_dict, pca_fin, fileName):
+
         changed_id = [p['prop_id'] for p in dash.callback_context.triggered][0]
 
         if 'save-button' in changed_id:
-            print(fin_surf_model)
-            # save
+
+            # add fields to main data freame
             df_dict = load_nucleus_dataset(fileName)
             df = df_dict["df"]
-            class_predictions = class_predictions
+            class_predictions = json.loads(class_predictions)
+            # add nucleus class predictions
+            # class_predictions = class_predictions
             if len(class_predictions) == df.shape[0]:
                 df["pec_fin_flag"] = class_predictions
+
+            # add data from surface fitting
+            surf_fit_dict = json.loads(surf_fit_dict)
+            if len(surf_fit_dict) > 0:
+                pec_fin_nuclei = np.where(np.asarray(class_predictions) == 2)[0]
+                # add fit results to df
+                df["PD_pos"] = np.nan
+                df["PD_pos"].iloc[pec_fin_nuclei] = surf_fit_dict["PD_pos"]
+                df["AP_pos"] = np.nan
+                df["AP_pos"].iloc[pec_fin_nuclei] = surf_fit_dict["AP_pos"]
+                df["DV_pos"] = np.nan
+                df["DV_pos"].iloc[pec_fin_nuclei] = surf_fit_dict["DV_pos"]
+
+                xyz_point_surf = np.asarray(surf_fit_dict["xyz_surf"])
+
+                df["X_surf"] = np.nan
+                df["X_surf"].iloc[pec_fin_nuclei] = xyz_point_surf[:, 0]
+                df["Y_surf"] = np.nan
+                df["Y_surf"].iloc[pec_fin_nuclei] = xyz_point_surf[:, 1]
+                df["Z_surf"] = np.nan
+                df["Z_surf"].iloc[pec_fin_nuclei] = xyz_point_surf[:, 2]
+
             write_file = dataRoot + fileName + '_nucleus_props.csv'
             df.to_csv(write_file)
 
+            # save auxiliary files
             write_file2 = dataRoot + fileName + '_curation_info/base_points.pkl'
             with open(write_file2, 'wb') as wf:
                 pickle.dump(base_points, wf)
@@ -1322,9 +1304,9 @@ def segment_pec_fins(dataRoot):
             with open(write_file6, 'wb') as wf:
                 pickle.dump(fin_surf_model, wf)
 
-            # write_file7 = dataRoot + fileName + '_curation_info/pca_fin.pkl'
-            # with open(write_file7, 'wb') as wf:
-            #     pickle.dump(pca_fin, wf)
+            write_file7 = dataRoot + fileName + '_curation_info/pca_fin.pkl'
+            with open(write_file7, 'wb') as wf:
+                pickle.dump(pca_fin, wf)
 
             # save
             # model_file = dataRoot + 'model.sav'
