@@ -243,8 +243,8 @@ def fit_quadratic_surface(df, c0, pec_fin_nuclei, r, k_nn=7):
     # Transform fin base and sphere center points to PCA space
     pca_fin_surf_cm = PCAFIN.transform(np.reshape(surf_cm, (1, 3)))
     pca_fin_surf_cm = pca_fin_surf_cm.ravel()
-    pca_fin_c0 = PCAFIN.transform(np.reshape(c0, (1, 3)))
-    pca_fin_c0 = pca_fin_c0.ravel()
+    pca_c0 = PCAFIN.transform(np.reshape(c0, (1, 3)))
+    pca_c0 = pca_c0.ravel()
 
     # generate reference grid for use during the fit procedure
     grid_res = 50
@@ -263,7 +263,7 @@ def fit_quadratic_surface(df, c0, pec_fin_nuclei, r, k_nn=7):
 
     # NL: this version directly enforces that the surface be normal to the sphere where it intersects the surface
     # I found that this lead to poor fit quality, but worth further exploration
-    # def l2_fit_loss_plane_euc(C_prop, xyz_fin=pca_fin, xy=xy2, cp=pca_fin_surf_cm, sp=pca_fin_c0):
+    # def l2_fit_loss_plane_euc(C_prop, xyz_fin=pca_fin, xy=xy2, cp=pca_fin_surf_cm, sp=pca_c0):
     #     xyz_pd, C0_full, _, _ = predict_quadratic_surface2(xy, C_prop, cp, sp)
     #     dist_array = distance_matrix(xyz_fin, xyz_pd)
     #     residuals = np.min(dist_array, axis=1)
@@ -310,7 +310,7 @@ def fit_quadratic_surface(df, c0, pec_fin_nuclei, r, k_nn=7):
     # Calculate AP position of each base point. These will be used to assign AP positions to fin nuclei
     ##############
     # first, find points at intersection of surface and sphere
-    sp_dist_array = np.abs(np.sqrt(np.sum((pca_fin_pd_array - pca_fin_c0) ** 2, axis=1)) - r)
+    sp_dist_array = np.abs(np.sqrt(np.sum((pca_fin_pd_array - pca_c0) ** 2, axis=1)) - r)
     close_indices = np.where(sp_dist_array <= 1)[0]
     pca_fin_pd_base = pca_fin_pd_array[close_indices]
     xyz_pd_array = PCAFIN.inverse_transform(pca_fin_pd_base)
@@ -378,7 +378,12 @@ def fit_quadratic_surface(df, c0, pec_fin_nuclei, r, k_nn=7):
         # find closest base point
         min_i = np.argmin(np.abs(dist_list))
         pd_i[p] = min_i
-        pd_pos[p] = dist_list[min_i]
+        
+        
+        # calculate sign
+        center_dist = np.sqrt(np.sum((pca_c0-surf_point)**2))
+        c0_sign = np.sign(center_dist-r)
+        pd_pos[p] = np.abs(dist_list[min_i])*c0_sign
 
     # use ID of closest base point to assign AP position
     pd_i = pd_i.astype(int)
@@ -469,7 +474,7 @@ def sphereFit_fixed_r(spX,spY,spZ,r0):
     xyz_array[:, 1] = spY
     xyz_array[:, 2] = spZ
     c0 = np.mean(xyz_array, axis=0)
-    c0[2] = -250
+    c0[2] = -r0
     def ob_fun(c0, xyz=xyz_array, r=r0):
         res = np.sqrt((xyz[:, 0]-c0[0])**2 + (xyz[:, 1]-c0[1])**2 + (xyz[:, 2]-c0[2])**2) - r
         return res
@@ -1137,12 +1142,16 @@ def segment_pec_fins(dataRoot):
                 xyz_fit_curve, fin_surf_model, surf_cm, P0, _, xyz_point_surf, pd_pos_vec, ap_pos_vec, dv_pos_vec, pca_fin \
                                                                       = fit_quadratic_surface(df, c0, pec_fin_nuclei, r)
                 dv_pos_vec = dv_pos_vec.ravel()
+
                 surf_fit_dict = {"PD_pos": pd_pos_vec.tolist(), "DV_pos": dv_pos_vec.tolist(),
                                  "AP_pos": ap_pos_vec.tolist(), "xyz_surf": xyz_point_surf.tolist()}
 
         elif fin_surf_model:
             if len(pec_fin_nuclei) > 0:
                 xyz_fit_curve = generate_quadratic_surface(df, fin_surf_model, pec_fin_nuclei)
+
+            # apply correction to PD coordinates
+            # if (len(base_nuclei) > 0)
 
 
         ################

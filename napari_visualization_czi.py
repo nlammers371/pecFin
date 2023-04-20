@@ -7,7 +7,7 @@ from skimage.measure import label, regionprops, regionprops_table
 from aicsimageio import AICSImage
 
 # set parameters
-filename = "2022_12_21 HCR Prdm1a Robo3 Fgf10a_1"
+filename = "2022_12_21 HCR Prdm1a Robo3 Fgf10a_3"
 readPath = "/Users/nick/Dropbox (Cole Trapnell's Lab)/Nick/pecFin/HCR_Data/raw/" + filename[:-2] + "/" + filename + "_decon.czi"
 readPathLabels = "/Users/nick/Dropbox (Cole Trapnell's Lab)/Nick/pecFin/HCR_Data/built_zarr_files/" + filename + ".zarrlabels" #"/Users/nick/Dropbox (Cole Trapnell's Lab)/Nick/pecFin/HCR_Data/built_zarr_files/" + filename + "labels"
 readPathMeta = "/Users/nick/Dropbox (Cole Trapnell's Lab)/Nick/pecFin/HCR_Data/built_zarr_files/" + filename + ".zarr"
