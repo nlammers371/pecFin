@@ -117,6 +117,10 @@ def flatten_fin(df, k_nn=5, dv_thresh=30):
     surf_tr_new[:, 0] = new_axis1[0] * surf_transformed[:, 0] + new_axis1[1] * surf_transformed[:, 1]
     surf_tr_new[:, 1] = new_axis2[0] * surf_transformed[:, 0] + new_axis2[1] * surf_transformed[:, 1]
 
+    # regularize AP direction by comparing to Y axi
+    cc = np.corrcoef(surf_tr_new[:, 1], df_fin["Y"])
+    surf_tr_new[:, 1] = surf_tr_new[:, 1]*np.sign(cc[1, 0])
+
     # center the AP axis 
     surf_tr_new[:, 1] - np.mean(surf_tr_new[:, 1], axis=0)
     

@@ -623,7 +623,7 @@ def polyfit2d(x, y, z, order=2):
     m, _, _, _ = np.linalg.lstsq(G, z)
     return m
 
-def segment_pec_fins(dataRoot):
+def visualize_atlas(dataRoot):
 
     global fileList, imNameList
     # get list of filepaths
@@ -1332,7 +1332,7 @@ if __name__ == '__main__':
     level = 1
 
     # load image data
-    segment_pec_fins(dataRoot)
+    visualize_atlas(dataRoot)
 
     #nucleus_coordinates = pd.read_csv('/Users/nick/test.csv')
     #print(nucleus_coordinates)

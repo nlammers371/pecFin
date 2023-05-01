@@ -13,7 +13,7 @@ import os
 from scipy.interpolate import LinearNDInterpolator
 import alphashape
 
-def segment_pec_fins(dataRoot):
+def visualize_atlas(dataRoot):
 
     global fileList, imNameList
     # get list of filepaths
@@ -396,4 +396,4 @@ if __name__ == '__main__':
     dataRoot = "/Users/nick/Dropbox (Cole Trapnell's Lab)/Nick/pecFin/HCR_Data/nucleus_props/"
 
     # load image data
-    segment_pec_fins(dataRoot)
+    visualize_atlas(dataRoot)

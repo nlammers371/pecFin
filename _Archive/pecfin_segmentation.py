@@ -19,7 +19,7 @@ import os
 import math
 
 
-def segment_pec_fins(dataRoot, nn_k=10):
+def visualize_atlas(dataRoot, nn_k=10):
 
     filename = "2022_12_15 HCR Hand2 Tbx5a Fgf10a_1"
 
@@ -290,7 +290,7 @@ if __name__ == '__main__':
     level = 1
 
     # load image data
-    segment_pec_fins(dataRoot)
+    visualize_atlas(dataRoot)
 
     #nucleus_coordinates = pd.read_csv('/Users/nick/test.csv')
     #print(nucleus_coordinates)
