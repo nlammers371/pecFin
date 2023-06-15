@@ -225,7 +225,7 @@ def cellpose_segmentation(
         # Select 2D/3D behavior and set some parameters
         do_3D = data_zyx.shape[0] > 1
 
-        # Prelminary checks on Cellpose model
+        # Preliminary checks on Cellpose model
         if pretrained_model is None:
             if model_type not in ["nuclei", "cyto2", "cyto"]:
                 raise ValueError(f"ERROR model_type={model_type} is not allowed.")

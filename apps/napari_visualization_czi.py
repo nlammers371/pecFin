@@ -2,15 +2,15 @@ from ome_zarr.io import parse_url
 from ome_zarr.reader import Reader
 import napari
 import numpy as np
-from napari_animation import Animation
-from skimage.measure import label, regionprops, regionprops_table
 from aicsimageio import AICSImage
+import os
 
 # set parameters
 filename = "2022_12_21 HCR Prdm1a Robo3 Fgf10a_3"
-readPath = "/Users/nick/Dropbox (Cole Trapnell's Lab)/Nick/pecFin/HCR_Data/raw/" + filename[:-2] + "/" + filename + "_decon.czi"
-readPathLabels = "/Users/nick/Dropbox (Cole Trapnell's Lab)/Nick/pecFin/HCR_Data/built_zarr_files/" + filename + ".zarrlabels" #"/Users/nick/Dropbox (Cole Trapnell's Lab)/Nick/pecFin/HCR_Data/built_zarr_files/" + filename + "labels"
-readPathMeta = "/Users/nick/Dropbox (Cole Trapnell's Lab)/Nick/pecFin/HCR_Data/built_zarr_files/" + filename + ".zarr"
+db_path = "E:\\Nick\\Dropbox (Cole Trapnell's Lab)\\Nick\\pecFin\\HCR_Data\\"
+readPath = os.path.join(db_path, 'raw', filename[:-2], filename + "_decon.czi")
+readPathLabels = os.path.join(db_path, 'built_zarr_files', filename + ".zarrlabels")
+readPathMeta = os.path.join(db_path, 'built_zarr_files', filename + ".zarr") #"/Users/nick/Dropbox (Cole Trapnell's Lab)/Nick/pecFin/HCR_Data/built_zarr_files/" + filename + ".zarr"
 
 #############
 # Main image
@@ -24,10 +24,10 @@ nodes = list(reader())
 
 # first node will be the image pixel data
 image_node = nodes[0]
-
+image_data = image_node.data
 # load in raw czi file
-imObject = AICSImage(readPath)
-imData = np.squeeze(imObject.data)
+# imObject = AICSImage(readPath)
+# imData = np.squeeze(imObject.data)
 
 #############
 # Labels
@@ -60,8 +60,8 @@ channel_names = [channel_metadata[i]["label"] for i in range(len(channel_metadat
 #colormaps = [channel_metadata[i]["color"] for i in range(len(channel_metadata))]
 colormaps = ["red", "blue", "green", "gray"]
 
-viewer = napari.view_image(imData, channel_axis=0, name=channel_names, colormap=colormaps, scale=scale_vec)
-labels_layer = viewer.add_labels(label_data[0], name='segmentation', scale=scale_vec)
+viewer = napari.view_image(image_data[1], channel_axis=0, name=channel_names, colormap=colormaps, scale=scale_vec)
+labels_layer = viewer.add_labels(label_data[1], name='segmentation', scale=scale_vec)
 
 viewer.theme = "dark"
 
