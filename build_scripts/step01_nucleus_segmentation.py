@@ -15,7 +15,7 @@ Copyright 2022 (C)
 
 Image segmentation via Cellpose library
 """
-
+from tifffile import TiffWriter
 import shutil
 import logging
 import glob2 as glob
@@ -176,7 +176,7 @@ def cellpose_segmentation(
     # get list of images
     image_list = sorted(glob.glob(zarr_directory + "*.zarr"))
 
-    for im in range(1,len(image_list)):
+    for im in [0]: #range(1,len(image_list)):
         zarrurl = image_list[im]
         # read the image data
         store = parse_url(zarrurl, mode="r").store
@@ -265,21 +265,21 @@ def cellpose_segmentation(
             ]
 
             # Open new zarr group for mask 0-th level
-            logger.info(f"{zarrurl}labels/{output_label_name}/0")
+            # logger.info(f"{zarrurl}labels\\{output_label_name}\\0")
             label_dtype = np.uint32 # NL: this may be way bigger than is actually required
 
-            write_store = da.core.get_mapper(f"{zarrurl}labels/{output_label_name}/0")
+            # write_store = da.core.get_mapper(f"{zarrurl}labels\\{output_label_name}\\0") # NL: note that "get_mapper" is not present in more recent dask dirstributions
 
             #print(image_data[0][ind_channel, :, :, :].chunksize.type)
-            cs = tuple([image_data[0][ind_channel, :, :, :].chunksize[0], 128, 128])
-            mask_zarr = zarr.create(
-                shape=image_data[0][ind_channel, :, :, :].shape,
-                chunks=cs,
-                dtype=label_dtype,
-                store=write_store,
-                overwrite=False,
-                dimension_separator="/",
-            )
+            # cs = tuple([image_data[0][ind_channel, :, :, :].chunksize[0], 128, 128])
+            # mask_zarr = zarr.create(
+            #     shape=image_data[0][ind_channel, :, :, :].shape,
+            #     chunks=cs,
+            #     dtype=label_dtype,
+            #     store=write_store,
+            #     overwrite=False,
+            #     dimension_separator="/",
+            # )
 
            # logger.info(
            #     f"mask will have shape {data_zyx.shape} "
@@ -327,10 +327,14 @@ def cellpose_segmentation(
 
             # Compute and store 0-th level to disk
             #print(image_mask_0.shape)
-            da.array(image_mask_0).to_zarr(
-                url=mask_zarr,
-                compute=True,
-            )
+            # da.array(image_mask_0).to_zarr(
+            #     url=mask_zarr,
+            #     compute=True,
+            # )
+
+            label_name = zarrurl.replace('.zarr', '_labels')
+            with TiffWriter(label_name + '.ome.tif', bigtiff=True) as tif:
+                tif.write(image_mask_0)
 
             logger.info(
                 f"End cellpose_segmentation task for {zarrurl}, "
@@ -339,14 +343,14 @@ def cellpose_segmentation(
 
             # Starting from on-disk highest-resolution data, build and write to disk a
             # pyramid of coarser levels
-            build_pyramid(
-                zarrurl=f"{zarrurl}labels/{output_label_name}",
-                overwrite=False,
-                num_levels=num_levels,
-                coarsening_xy=coarsening_xy,
-                chunksize=image_data[0][ind_channel, :, :, :].chunksize,
-                aggregation_function=np.max,
-            )
+            # build_pyramid(
+            #     zarrurl=f"{zarrurl}labels/{output_label_name}",
+            #     overwrite=False,
+            #     num_levels=num_levels,
+            #     coarsening_xy=coarsening_xy,
+            #     chunksize=image_data[0][ind_channel, :, :, :].chunksize,
+            #     aggregation_function=np.max,
+            # )
 
             logger.info(f"End building pyramids, exit")
         else:
@@ -356,14 +360,13 @@ def cellpose_segmentation(
 
 if __name__ == "__main__":
     #zarr_directory = "/Users/nick/Dropbox (Cole Trapnell's Lab)/Nick/pecFin/HCR_Data/built_zarr_files/"
-    zarr_directory = "/mnt/nas/HCR_data/built_zarr_files/"
+    zarr_directory = "E:\\Nick\\Dropbox (Cole Trapnell's Lab)\\Nick\\pecFin\\HCR_Data\\built_zarr_files\\" #"/mnt/nas/HCR_data/built_zarr_files/"
     seg_channel_label = 'DAPI'
     level = 1
-    pretrained_model = "/home/nickl/Projects/pecFin/cellpose_models/DAPI-Pro-2"
-    overwrite = False
+    pretrained_model = "C:\\Users\\nlammers\\Projects\\pecFin\\cellpose_models\\DAPI-Pro-3"
+    overwrite = True
     model_type = "nuclei"
     output_label_name = "DAPI"
-    test_flag = True
 
     cellpose_segmentation(zarr_directory=zarr_directory, level=level, seg_channel_label=seg_channel_label,
                           output_label_name=output_label_name, pretrained_model=pretrained_model, overwrite=overwrite)
