@@ -269,7 +269,7 @@ def cellpose_segmentation(
             label_dtype = np.uint32 # NL: this may be way bigger than is actually required
 
             # write_store = da.core.get_mapper(f"{zarrurl}labels\\{output_label_name}\\0") # NL: note that "get_mapper" is not present in more recent dask dirstributions
-            write_store = zarr.open(f"{zarrurl}labels/{output_label_name}/0")
+            write_store = f"{zarrurl}labels/{output_label_name}/0"#zarr.open(f"{zarrurl}labels/{output_label_name}/0")
             #print(image_data[0][ind_channel, :, :, :].chunksize.type)
             cs = tuple([image_data[0][ind_channel, :, :, :].chunksize[0], 128, 128])
             mask_zarr = zarr.create(
