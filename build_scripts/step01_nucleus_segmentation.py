@@ -176,7 +176,7 @@ def cellpose_segmentation(
     # get list of images
     image_list = sorted(glob.glob(zarr_directory + "*.zarr"))
 
-    for im in [0]: #range(1,len(image_list)):
+    for im in range(1,len(image_list)):
         zarrurl = image_list[im]
         # read the image data
         store = parse_url(zarrurl, mode="r").store

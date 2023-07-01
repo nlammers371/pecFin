@@ -176,7 +176,7 @@ def cellpose_segmentation(
     # get list of images
     image_list = sorted(glob.glob(zarr_directory + "*.zarr"))
 
-    for im in [0]: #range(1,len(image_list)):
+    for im in range(1,len(image_list)):
         zarrurl = image_list[im]
         # read the image data
         store = parse_url(zarrurl, mode="r").store
@@ -241,13 +241,13 @@ def cellpose_segmentation(
                 output_label_name = f"label_{ind_channel}"
 
         segment_flag = True
-        if os.path.isdir(zarrurl+'labels') and overwrite:
-            shutil.rmtree(zarrurl+'labels')
-        elif os.path.isdir(zarrurl+'labels'):
+        if os.path.isdir(zarrurl+'labelpriors') and overwrite:
+            shutil.rmtree(zarrurl+'labelpriors')
+        elif os.path.isdir(zarrurl+'labelpriors'):
             segment_flag = False
 
         if segment_flag:
-            labels_group = zarr.group(f"{zarrurl}labels")
+            labels_group = zarr.group(f"{zarrurl}labelpriors")
             labels_group.attrs["labels"] = [output_label_name]
             label_group = labels_group.create_group(output_label_name)
             label_group.attrs["image-label"] = {"version": __OME_NGFF_VERSION__}
@@ -269,7 +269,7 @@ def cellpose_segmentation(
             label_dtype = np.uint32 # NL: this may be way bigger than is actually required
 
             # write_store = da.core.get_mapper(f"{zarrurl}labels\\{output_label_name}\\0") # NL: note that "get_mapper" is not present in more recent dask dirstributions
-            write_store = f"{zarrurl}labels/{output_label_name}/0"#zarr.open(f"{zarrurl}labels/{output_label_name}/0")
+            write_store = f"{zarrurl}labelpriors/{output_label_name}/0"#zarr.open(f"{zarrurl}labels/{output_label_name}/0")
             #print(image_data[0][ind_channel, :, :, :].chunksize.type)
             cs = tuple([image_data[0][ind_channel, :, :, :].chunksize[0], 128, 128])
             mask_zarr = zarr.create(
@@ -308,20 +308,20 @@ def cellpose_segmentation(
             # logger.info(f"{data_zyx.chunks}")
 
             # Execute illumination correction
-            # image_mask = segment_FOV(
-            #     data_zyx, #data_zyx.compute(),
-            #     model=model,
-            #     do_3D=do_3D,
-            #     anisotropy=anisotropy,
-            #     label_dtype=label_dtype,
-            #     diameter=diameter_level0 / coarsening_xy**level,
-            #     cellprob_threshold=cellprob_threshold,
-            #     flow_threshold=flow_threshold,
-            #     min_size=min_size,
-            #     pretrain_flag=(pretrained_model != None)
-            # )
-            image_mask = np.zeros(data_zyx.shape)
-            #image_mask = np.zeros(data_zyx.shape, dtype='uint32')f
+            image_mask = segment_FOV(
+                data_zyx, #data_zyx.compute(),
+                model=model,
+                do_3D=do_3D,
+                anisotropy=anisotropy,
+                label_dtype=label_dtype,
+                diameter=diameter_level0 / coarsening_xy**level,
+                cellprob_threshold=cellprob_threshold,
+                flow_threshold=flow_threshold,
+                min_size=min_size,
+                pretrain_flag=(pretrained_model != None)
+            )
+            # image_mask = np.zeros(data_zyx.shape)
+            # image_mask = np.zeros(data_zyx.shape, dtype='uint32')
             shape0 = image_data[0][ind_channel, :, :, :].shape
             #image_mask_1 = resize(image_mask, (image_mask.shape[0], shape0[1], shape0[2]), order=0)
             image_mask_0 = resize(image_mask, shape0, order=0, anti_aliasing=False, preserve_range=True)
@@ -345,7 +345,7 @@ def cellpose_segmentation(
             # Starting from on-disk highest-resolution data, build and write to disk a
             # pyramid of coarser levels
             build_pyramid(
-                zarrurl=f"{zarrurl}labels/{output_label_name}",
+                zarrurl=f"{zarrurl}labelpriors/{output_label_name}",
                 overwrite=False,
                 num_levels=num_levels,
                 coarsening_xy=coarsening_xy,
