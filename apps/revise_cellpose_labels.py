@@ -29,11 +29,14 @@ if overwrite_flag:
 zarr_dir = os.path.join(db_path, 'built_zarr_files', '')
 project_list = glob.glob(zarr_dir + '*.zarrlabelpriors')
 
-for p in [2]:#range(len(project_list)):
+project_i = 2
+while project_i <= len(project_list):
+# for p in [2]:#range(len(project_list)):
+    wait = 0
 
-    r_seed = r_seed_list[p]
+    r_seed = r_seed_list[project_i]
     np.random.seed(r_seed)  # set random seed
-    filename_raw = path_leaf(project_list[p])
+    filename_raw = path_leaf(project_list[project_i])
     filename = filename_raw.replace(".zarrlabelpriors", "")
 
     im_read_path = os.path.join(db_path, 'raw', filename[:-2], filename + ".czi")
@@ -91,7 +94,13 @@ for p in [2]:#range(len(project_list)):
         label_path = write_path + filename + suffix + "_seg.npy"
         slice_path = write_path + filename + suffix + ".tiff"
 
-        if (label_path not in existing_labels) or (not skip_labeled_flag):
+        save_name = os.path.join(write_path, filename + suffix + f'{slice_num:04}')
+
+        skip_flag = True
+
+        if (label_path not in existing_labels) or overwrite_flag:
+            skip_flag = False
+            print("Starting with raw label priors...")
             if slice_id == 0:
                 im_slice = image_data[slice_num, :, :]
                 lb_slice = np.asarray(label_data[slice_num, :, :])
@@ -110,9 +119,18 @@ for p in [2]:#range(len(project_list)):
                 im_slice = resize(im_slice, dim_vec[1:], order=0, anti_aliasing=False)
                 lb_slice = resize(lb_slice, dim_vec[1:], order=0, anti_aliasing=False, preserve_range=True)
 
+        elif (label_path in existing_labels) and (not skip_labeled_flag):
+            skip_flag = False
+            print("Starting previouly revised label priors...")
+            im_slice = cv2.imread(save_name + ".tiff")
+            lb_slice = np.load(save_name + "_labels.npy")
+
+        if not skip_flag:
             # open viewer
             viewer = napari.view_image(im_slice, colormap="gray")
             viewer.add_labels(lb_slice, name="Labels")
+
+            print('First free label: ' + str(np.max(lb_slice)+1))
 
             napari.run()
 
@@ -121,24 +139,32 @@ for p in [2]:#range(len(project_list)):
 
             # AICSImage(lb_layer.data.astype(np.uint8)).save(lb_path_full)
             # # save
-            # cv2.imwrite(image_path + prefix + '_' + im_name, im_temp)
+            cv2.imwrite(save_name + ".tiff", im_slice)
+            np.save(save_name + "_labels.npy", lb_layer.data.astype(np.uint8))
                 # time_in_msec = 1000
                 # QTimer().singleShot(time_in_msec, app.quit)
 
             # viewer.close()
             # cv2.imwrite(label_path + im_name, lb_layer.data)
 
-            wait = input("Press Enter to continue to next image. \nPress 'x' then Enter to exit. \nPress '' then Enter to exit.")
+            wait = input("Press Enter to continue to next image. \nPress 'x' then Enter to exit. \nPress 'n' then Enter to move to next experiment.")
             if wait == 'x':
                 break
-            elif isinstance(wait, int):
-                image_i = wait
+            elif wait == 'n':
+                break
             else:
                 image_i += 1
                 print(image_i)
 
         else:
             image_i += 1
+
+    if wait == 'x':
+        break  # break the loop
+    else:
+        image_i = 0
+        project_i += 1
+
 
 
 # load label file if it exists
