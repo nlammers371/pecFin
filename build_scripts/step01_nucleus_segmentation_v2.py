@@ -115,6 +115,7 @@ def segment_FOV(
         f" max(mask): {np.max(mask)} |"
         f" model.diam_mean: {model.diam_mean} |"
         f" diameter: {diameter} |"
+        f" anisotropy: {anisotropy} |"
         f" flow threshold: {flow_threshold}"
     )
 
@@ -128,7 +129,7 @@ def cellpose_segmentation(
     # Task-specific arguments
     level: int,
     seg_channel_label: Optional[str] = None,
-    diameter_level0: float = 80.0,
+    diameter_level0: float = 60.0,
     cellprob_threshold: float = 0.0,
     flow_threshold: float = 0.4,
     output_label_name: Optional[str] = None,
@@ -176,7 +177,7 @@ def cellpose_segmentation(
     # get list of images
     image_list = sorted(glob.glob(zarr_directory + "*.zarr"))
 
-    for im in range(1,len(image_list)):
+    for im in range(0, len(image_list)):
         zarrurl = image_list[im]
         # read the image data
         store = parse_url(zarrurl, mode="r").store
@@ -241,13 +242,13 @@ def cellpose_segmentation(
                 output_label_name = f"label_{ind_channel}"
 
         segment_flag = True
-        if os.path.isdir(zarrurl+'labelpriors') and overwrite:
-            shutil.rmtree(zarrurl+'labelpriors')
-        elif os.path.isdir(zarrurl+'labelpriors'):
+        if os.path.isdir(zarrurl+'labels') and overwrite:
+            shutil.rmtree(zarrurl+'labels')
+        elif os.path.isdir(zarrurl+'labels'):
             segment_flag = False
 
         if segment_flag:
-            labels_group = zarr.group(f"{zarrurl}labelpriors")
+            labels_group = zarr.group(f"{zarrurl}labels")
             labels_group.attrs["labels"] = [output_label_name]
             label_group = labels_group.create_group(output_label_name)
             label_group.attrs["image-label"] = {"version": __OME_NGFF_VERSION__}
@@ -266,10 +267,10 @@ def cellpose_segmentation(
 
             # Open new zarr group for mask 0-th level
             # logger.info(f"{zarrurl}labels\\{output_label_name}\\0")
-            label_dtype = np.uint32 # NL: this may be way bigger than is actually required
+            label_dtype = np.uint32  # NL: this may be way bigger than is actually required
 
             # write_store = da.core.get_mapper(f"{zarrurl}labels\\{output_label_name}\\0") # NL: note that "get_mapper" is not present in more recent dask dirstributions
-            write_store = f"{zarrurl}labelpriors/{output_label_name}/0"#zarr.open(f"{zarrurl}labels/{output_label_name}/0")
+            write_store = f"{zarrurl}labels/{output_label_name}/0"#zarr.open(f"{zarrurl}labels/{output_label_name}/0")
             #print(image_data[0][ind_channel, :, :, :].chunksize.type)
             cs = tuple([image_data[0][ind_channel, :, :, :].chunksize[0], 128, 128])
             mask_zarr = zarr.create(
@@ -323,8 +324,13 @@ def cellpose_segmentation(
             # image_mask = np.zeros(data_zyx.shape)
             # image_mask = np.zeros(data_zyx.shape, dtype='uint32')
             shape0 = image_data[0][ind_channel, :, :, :].shape
+            print(shape0)
+            print(image_mask.shape)
             #image_mask_1 = resize(image_mask, (image_mask.shape[0], shape0[1], shape0[2]), order=0)
-            image_mask_0 = resize(image_mask, shape0, order=0, anti_aliasing=False, preserve_range=True)
+            if level == 0:
+                image_mask_0 = image_mask.copy()
+            else:
+                image_mask_0 = resize(image_mask, shape0, order=0, anti_aliasing=False, preserve_range=True)
 
             # Compute and store 0-th level to disk
             #print(image_mask_0.shape)
@@ -345,7 +351,7 @@ def cellpose_segmentation(
             # Starting from on-disk highest-resolution data, build and write to disk a
             # pyramid of coarser levels
             build_pyramid(
-                zarrurl=f"{zarrurl}labelpriors/{output_label_name}",
+                zarrurl=f"{zarrurl}labels/{output_label_name}",
                 overwrite=False,
                 num_levels=num_levels,
                 coarsening_xy=coarsening_xy,
@@ -361,10 +367,10 @@ def cellpose_segmentation(
 
 if __name__ == "__main__":
     #zarr_directory = "/Users/nick/Dropbox (Cole Trapnell's Lab)/Nick/pecFin/HCR_Data/built_zarr_files/"
-    zarr_directory = "E:\\Nick\\Dropbox (Cole Trapnell's Lab)\\Nick\\pecFin\\HCR_Data\\built_zarr_files\\" #"/mnt/nas/HCR_data/built_zarr_files/"
+    zarr_directory = "E:\\Nick\\Dropbox (Cole Trapnell's Lab)\\Nick\\pecFin\\HCR_Data\\built_zarr_files2\\" #"/mnt/nas/HCR_data/built_zarr_files/"
     seg_channel_label = 'DAPI'
-    level = 1
-    pretrained_model = "C:\\Users\\nlammers\\Projects\\pecFin\\cellpose_models\\DAPI-Pro-3"
+    level = 0
+    pretrained_model = "C:\\Users\\nlammers\\Projects\\pecFin\\cellpose_models\\DAPI-Pro-5"
     overwrite = True
     model_type = "nuclei"
     output_label_name = "DAPI"

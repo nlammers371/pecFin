@@ -5,6 +5,7 @@ import glob2 as glob
 import cv2
 from aicsimageio import AICSImage
 import ntpath
+from tqdm import tqdm
 from ome_zarr.io import parse_url
 from ome_zarr.reader import Reader
 from skimage.transform import resize
@@ -15,11 +16,13 @@ def path_leaf(path):
     return tail or ntpath.basename(head)
 
 # designate read paths
-# db_path = "E:\\Nick\\Dropbox (Cole Trapnell's Lab)\\Nick\\pecFin\\HCR_Data\\"
-db_path = "/Users/nick/Dropbox (Cole Trapnell's Lab)/Nick/pecFin/HCR_Data/"
+db_path = "E:\\Nick\\Dropbox (Cole Trapnell's Lab)\\Nick\\pecFin\\HCR_Data\\"
+# db_path = "/Users/nick/Dropbox (Cole Trapnell's Lab)/Nick/pecFin/HCR_Data/"
 r_seed_list = [443, 242, 253, 903, 437, 371, 883, 910, 503, 921, 108, 730]
 suffix_vec = ["_xy", "_zx", "_zy"]
-window_size = 512
+window_size = 768
+decon_flag = True
+n_samples = 10
 overwrite_flag = False
 skip_labeled_flag = False
 if overwrite_flag:
@@ -30,7 +33,8 @@ zarr_dir = os.path.join(db_path, 'built_zarr_files', '')
 project_list = glob.glob(zarr_dir + '*.zarrlabelpriors')
 
 project_i = 0
-for project_i in range(len(project_list)):
+print("Generating training slices...")
+for project_i in tqdm(range(0, len(project_list))):
 # for p in [2]:#range(len(project_list)):
 #     wait = 0
 
@@ -39,12 +43,12 @@ for project_i in range(len(project_list)):
     filename_raw = path_leaf(project_list[project_i])
     filename = filename_raw.replace(".zarrlabelpriors", "")
 
-    im_read_path = os.path.join(db_path, 'raw', filename[:-2], filename + ".czi")
-    lb_read_path = os.path.join(db_path, 'built_zarr_files', filename + ".zarrlabelpriors")
+    im_read_path = os.path.join(db_path, 'raw', filename[:-2], filename + "_decon.czi")
+    # lb_read_path = os.path.join(db_path, 'built_zarr_files', filename + ".zarrlabelpriors")
 
     # set write path
-    write_path = os.path.join(db_path, 'cellpose_training_slices', '')
-    write_path_xy = os.path.join(db_path, 'cellpose_training_slices_xy', '')
+    write_path = os.path.join(db_path, 'cellpose_training_slices_decon', '')
+    write_path_xy = os.path.join(db_path, 'cellpose_training_slices_decon_xy', '')
     if not os.path.isdir(write_path):
         os.makedirs(write_path)
     if not os.path.isdir(write_path_xy):
@@ -72,11 +76,11 @@ for project_i in range(len(project_list)):
 
     # randomly choose slices along each direction
     dim_vec = image_data.shape
-    xy_slice_indices = np.random.choice(range(dim_vec[0]), dim_vec[0], replace=False)
+    xy_slice_indices = np.random.choice(range(dim_vec[0]), n_samples, replace=False)
     xy_id_arr = np.zeros(xy_slice_indices.shape)
-    zx_slice_indices = np.random.choice(range(dim_vec[1]), int(dim_vec[0]/2), replace=False)
+    zx_slice_indices = np.random.choice(range(dim_vec[1]), int(n_samples/2), replace=False)
     zx_id_arr = np.ones(zx_slice_indices.shape)
-    zy_slice_indices = np.random.choice(range(dim_vec[2]), int(dim_vec[0]/2), replace=False)
+    zy_slice_indices = np.random.choice(range(dim_vec[2]), int(n_samples/2), replace=False)
     zy_id_arr = np.ones(zy_slice_indices.shape)*2
 
     # combine and shuffle
@@ -97,7 +101,8 @@ for project_i in range(len(project_list)):
         label_path = write_path + filename + suffix + "_seg.npy"
         slice_path = write_path + filename + suffix + ".tiff"
 
-        save_name = os.path.join(write_path, filename + suffix + f'{slice_num:04}')
+        rand_prefix = np.random.randint(0, 100000, 1)[0]
+        save_name = os.path.join(write_path, f'{rand_prefix:06}' + '_' + filename + suffix + f'{slice_num:04}')
 
         # skip_flag = True
 
@@ -112,22 +117,30 @@ for project_i in range(len(project_list)):
             im_slice = np.squeeze(image_data[:, slice_num, :])
             # lb_slice = np.squeeze(label_data[:, slice_num, :])
             # rescale
-            im_slice = resize(im_slice, dim_vec[1:], order=0, anti_aliasing=False)
+            rs_factor = scale_vec[0]/scale_vec[2]
+            new_dim = int(rs_factor*dim_vec[0])
+            im_slice = resize(im_slice, [new_dim, dim_vec[2]], order=0, anti_aliasing=False)
             # lb_slice = resize(lb_slice, dim_vec[1:], order=0, anti_aliasing=False, preserve_range=True)
 
         elif slice_id == 2:
             im_slice = np.squeeze(image_data[:, :, slice_num])
             # lb_slice = np.squeeze(label_data[:, :, slice_num])
             # rescale
-            im_slice = resize(im_slice, dim_vec[1:], order=0, anti_aliasing=False)
+            rs_factor = scale_vec[0] / scale_vec[1]
+            new_dim = int(rs_factor * dim_vec[0])
+            im_slice = resize(im_slice, [new_dim, dim_vec[1]], order=0, anti_aliasing=False)
             # lb_slice = resize(lb_slice, dim_vec[1:], order=0, anti_aliasing=False, preserve_range=True)
 
         # take randon chunk of full slice
-        shape_full = im_slice.shape
+        shape_full = np.asarray(im_slice.shape)
         im_lims = shape_full-window_size
-        x_start = np.random.choice(range(im_lims[1]), 1)
-        y_start = np.random.choice(range(im_lims[0]), 1)
-        im_slice_chunk = im_slice[y_start:y_start+window_size, x_start+x_start+window_size]
+        x_start = np.random.choice(range(im_lims[1]), 1)[0].astype(int)
+        if im_lims[0] < 0:
+            y_start = 0
+            im_slice_chunk = im_slice[:, x_start:x_start + window_size]
+        else:
+            y_start = np.random.choice(range(im_lims[0]), 1)[0].astype(int)
+            im_slice_chunk = im_slice[y_start:y_start+window_size, x_start:x_start+window_size]
 
         # if not skip_flag:
         #     # open viewer
@@ -145,7 +158,7 @@ for project_i in range(len(project_list)):
             # # save
         cv2.imwrite(save_name + ".tiff", im_slice_chunk)
         if slice_id == 0:
-            save_name_xy = os.path.join(write_path_xy, filename + suffix + f'{slice_num:04}')
+            save_name_xy = os.path.join(write_path_xy, f'{rand_prefix:06}' + '_' + filename + suffix + f'{slice_num:04}')
             cv2.imwrite(save_name_xy + ".tiff", im_slice_chunk)
             # np.save(save_name + "_labels.npy", lb_layer.data.astype(np.uint8))
                 # time_in_msec = 1000

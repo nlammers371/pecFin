@@ -20,9 +20,15 @@ import skimage.io
 import fractal_tasks_core
 import glob2 as glob
 import logging
+import ntpath
 
 __OME_NGFF_VERSION__ = fractal_tasks_core.__OME_NGFF_VERSION__
 
+
+
+def path_leaf(path):
+    head, tail = ntpath.split(path)
+    return tail or ntpath.basename(head)
 
 def define_omero_channels(
         *,
@@ -155,7 +161,7 @@ def write_to_ome_zarr(project_directory, write_directory, write_tiff=False, test
 
         # get list of valid image files within directory
         image_read_dir = project_directory + folder_name + '/'
-        image_list = sorted(glob.glob(image_read_dir + folder_name + "_*.czi"))
+        image_list = sorted(glob.glob(image_read_dir + folder_name + "_*decon.czi"))
 
         ######################
 
@@ -166,7 +172,8 @@ def write_to_ome_zarr(project_directory, write_directory, write_tiff=False, test
         for im in range(len(image_list)):
 
             image_path = Path(image_list[im])
-            image_name = image_list[im].replace(image_read_dir, '', 1)
+            # image_name = image_list[im].replace(image_read_dir, '', 1)
+            image_name = path_leaf(image_list[im])
             image_name = image_name.replace('.czi', '')
 
             # parse image name
@@ -219,11 +226,8 @@ def write_to_ome_zarr(project_directory, write_directory, write_tiff=False, test
                 channel_dict_list.append(dict_entry)
 
             # Define image zarr
-            if test_flag:
-                outDir = write_directory + '/built_zarr_files_small/'
-            else:
-                outDir = write_directory + '/built_zarr_files2/'
-            zarrurl = f"{outDir + image_name}.zarr"
+            outDir = os.path.join(write_directory, 'built_zarr_files2')
+            zarrurl = f"{os.path.join(outDir, image_name)}.zarr"
 
             skip_flag = True
 
@@ -340,66 +344,10 @@ def write_to_ome_zarr(project_directory, write_directory, write_tiff=False, test
                 print(f"WARNING: {zarrurl} already exists. Skipping. Set overwrite=1 to overwrite")
                 # raise Warning(f"WARNING: {zarrurl} already exists. Skipping. Set overwrite=1 to overwrite")
 
-            # write tiff if desired
-            if write_tiff:
-                if test_flag:
-                    tiffDir = write_directory + '/built_tiff_files_small/'
-                    trainDir = write_directory + '/tiff_training_slices_small/'
-                else:
-                    tiffDir = write_directory + '/built_tiff_files/'
-                    trainDir = write_directory + '/tiff_training_slices/'
-
-                filename = tiffDir + image_name
-                trainname = trainDir + image_name
-                if True: #not os.path.isfile(filename) or overwrite:
-                    np.random.seed(234)
-
-                    if not os.path.isdir(tiffDir):
-                        os.makedirs(tiffDir)
-
-                    if not os.path.isdir(trainDir):
-                        os.makedirs(trainDir)
-                    # load dopwn-sampled data
-                    reader = Reader(parse_url(zarrurl))
-
-                    # nodes may include images, labels etc
-                    nodes = list(reader())
-
-                    # first node will be the image pixel data
-                    image_node = nodes[0]
-                    np_data = np.asarray(image_node.data[1][3, :, :, :])
-
-                    # save full image
-                    skimage.io.imsave(filename + '.tiff', np_data)
-
-                    logger.info(f"Creating {image_name} DAPI.tiff")
-
-                    # save one XY, YZ, & XZ
-                    zi = np.random.randint(0, np_data.shape[0])
-                    xy_data = np_data[zi, :, :]
-                    yi = np.random.randint(0, np_data.shape[1])
-                    xz_data = np.squeeze(np_data[:, yi, :])
-                    # upsample z to roughly isometric space
-                    us_factor = np.round(pixel_size_z / (pixel_size_y*coarsening_factor) * xz_data.shape[0])
-                    xz_us = resize(xz_data, (us_factor, xz_data.shape[1]), order=0,
-                                          preserve_range=True)
-                    xi = np.random.randint(0, np_data.shape[2])
-                    yz_data = np.squeeze(np_data[:, :, xi])
-                    yz_us = resize(xz_data, (us_factor, yz_data.shape[1]), order=0,
-                                   preserve_range=True)
-                    # save slices
-                    skimage.io.imsave(trainname + 'xy.tiff', xy_data)
-                    skimage.io.imsave(trainname + 'xz.tiff', xz_us)
-                    skimage.io.imsave(trainname + 'yz.tiff', yz_us)
-
-
             now = time.time()
             print("It has been {0} seconds since the loop started".format(now - program_starts))
 
             gc.collect()
-
-
-
 
 if __name__ == '__main__':
 
@@ -407,9 +355,9 @@ if __name__ == '__main__':
     test_flag = False
     make_tiffs = False
     # set paths to raw data
-    project_directory = "/mnt/nas/HCR_data/raw/"
+    project_directory = "E:\\Nick\\Dropbox (Cole Trapnell's Lab)\\Nick\\pecFin\\HCR_Data\\raw\\"  #/mnt/nas/HCR_data/raw/"
     #project_directory = "/Users/nick/Dropbox (Cole Trapnell's Lab)/Nick/pecFin/HCR_Data/raw/"
     # set write paths
-    write_directory = "/mnt/nas/HCR_data/"
+    write_directory = "E:\\Nick\\Dropbox (Cole Trapnell's Lab)\\Nick\\pecFin\\HCR_Data\\"
     # call main function
     write_to_ome_zarr(project_directory, write_directory, overwrite=False, test_flag=test_flag, write_tiff=make_tiffs, match_string='*')
