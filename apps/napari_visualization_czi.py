@@ -7,8 +7,8 @@ from aicsimageio import AICSImage
 
 # set parameters
 filename = "2022_12_15 HCR Hand2 Tbx5a Fgf10a_3"
-# db_path = "E:\\Nick\\Dropbox (Cole Trapnell's Lab)\\Nick\\pecFin\\HCR_Data\\"
-db_path = "/Users/nick/Dropbox (Cole Trapnell's Lab)/Nick/pecFin/HCR_Data/"
+db_path = "E:\\Nick\\Dropbox (Cole Trapnell's Lab)\\Nick\\pecFin\\HCR_Data\\"
+# db_path = "/Users/nick/Dropbox (Cole Trapnell's Lab)/Nick/pecFin/HCR_Data/"
 readPath = os.path.join(db_path, 'raw', filename[:-2], filename + "_decon.czi")
 readPathLabels = os.path.join(db_path, 'built_zarr_files2', filename + "_decon.zarrlabels")
 readPathMeta = os.path.join(db_path, 'built_zarr_files2', filename + "_decon.zarr")
@@ -24,12 +24,12 @@ reader = Reader(parse_url(readPathMeta))
 # nodes may include images, labels etc
 nodes = list(reader())
 image_node = nodes[0]
-image_data = image_node.data
+# image_data = image_node.data
 # first node will be the image pixel data
 # image_data = image_node.data
 # load in raw czi file
 imObject = AICSImage(readPath)
-# image_data = np.squeeze(imObject.data)
+image_data = np.squeeze(imObject.data)
 
 #############
 # Labels
@@ -64,8 +64,8 @@ channel_names = [channel_metadata[i]["label"] for i in range(len(channel_metadat
 #colormaps = [channel_metadata[i]["color"] for i in range(len(channel_metadata))]
 colormaps = ["red", "blue", "green", "gray"]
 
-viewer = napari.view_image(image_data[1], channel_axis=0, name=channel_names, colormap=colormaps, scale=scale_vec)
-labels_layer = viewer.add_labels(label_data[1], name='segmentation')#, scale=scale_vec)
+viewer = napari.view_image(image_data, channel_axis=0, name=channel_names, colormap=colormaps, scale=scale_vec)
+#labels_layer = viewer.add_labels(label_data[0], name='segmentation', scale=scale_vec)#, scale=scale_vec)
 
 viewer.theme = "dark"
 
