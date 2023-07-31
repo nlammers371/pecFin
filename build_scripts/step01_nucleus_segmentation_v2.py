@@ -47,7 +47,7 @@ def segment_FOV(
     model=None,
     do_3D: bool = True,
     anisotropy=None,
-    diameter: float = 40.0,
+    diameter: float = 80,
     cellprob_threshold: float = 0.0,
     flow_threshold: float = 0.4,
     min_size=None,
@@ -98,7 +98,9 @@ def segment_FOV(
             channels=[0, 0],
             do_3D=do_3D,
             min_size=min_size,
+            diameter=diameter,
             anisotropy=anisotropy,
+            cellprob_threshold=cellprob_threshold,
             net_avg=False,
             augment=False
         )
@@ -129,8 +131,8 @@ def cellpose_segmentation(
     # Task-specific arguments
     level: int,
     seg_channel_label: Optional[str] = None,
-    diameter_level0: float = 60.0,
-    cellprob_threshold: float = 0.0,
+    diameter_level0: float = 54,
+    cellprob_threshold: float = -4.0,
     flow_threshold: float = 0.4,
     output_label_name: Optional[str] = None,
     model_type: Literal["nuclei", "cyto", "cyto2"] = "nuclei",
@@ -166,7 +168,8 @@ def cellpose_segmentation(
 
     # Read useful parameters from metadata
     coarsening_xy = 2 #NL: need to store this in metadata
-    min_size = (diameter_level0/coarsening_xy)**2
+    min_size = (diameter_level0/(coarsening_xy**level)/3)**3
+    print(min_size)
 
     # Preliminary check
     if seg_channel_label is None:
@@ -177,7 +180,7 @@ def cellpose_segmentation(
     # get list of images
     image_list = sorted(glob.glob(zarr_directory + "*.zarr"))
 
-    for im in range(0, len(image_list)):
+    for im in [2]: #range(3, len(image_list)):
         zarrurl = image_list[im]
         # read the image data
         store = parse_url(zarrurl, mode="r").store
@@ -210,18 +213,24 @@ def cellpose_segmentation(
             raise Exception(f"ERROR: Specified segmentation channel ({len(seg_channel_label)}) was not found in data")
 
         # Load ZYX data
-        data_zyx = image_data[level][ind_channel, :, :, :]
+        data_zyx_raw = image_data[level][ind_channel, :, :, :]
 
         #data_zyx = da.from_zarr(f"{zarrurl}{level}")[ind_channel]
-        logger.info(f"{data_zyx.shape=}")
+        logger.info(f"{data_zyx_raw.shape=}")
 
         # Read pixel sizes from zattrs file
         full_res_pxl_sizes_zyx = dataset_info[0]["coordinateTransformations"][0]["scale"]
         actual_res_pxl_sizes_zyx = dataset_info[level]["coordinateTransformations"][0]["scale"]
 
         # calculate anisotropy
-        anisotropy = actual_res_pxl_sizes_zyx[0]/actual_res_pxl_sizes_zyx[1]
+        anisotropy = 1 # actual_res_pxl_sizes_zyx[0]/actual_res_pxl_sizes_zyx[1]
         # resample z to make it isotropic
+        data_zyx = data_zyx_raw[100:140, 1000:1384, 1000:1384]
+        shape_curr = data_zyx.shape
+        rs_factor = actual_res_pxl_sizes_zyx[0] / actual_res_pxl_sizes_zyx[1]
+        shape_new = np.asarray(shape_curr)
+        shape_new[0] = np.round(shape_new[0] * rs_factor).astype(int)
+        data_zyx = resize(data_zyx, shape_new, order=1, anti_aliasing=False)
 
         # Select 2D/3D behavior and set some parameters
         do_3D = data_zyx.shape[0] > 1
@@ -273,18 +282,18 @@ def cellpose_segmentation(
             write_store = f"{zarrurl}labels/{output_label_name}/0"#zarr.open(f"{zarrurl}labels/{output_label_name}/0")
             #print(image_data[0][ind_channel, :, :, :].chunksize.type)
             cs = tuple([image_data[0][ind_channel, :, :, :].chunksize[0], 128, 128])
-            mask_zarr = zarr.create(
-                shape=image_data[0][ind_channel, :, :, :].shape,
-                chunks=cs,
-                dtype=label_dtype,
-                store=write_store,
-                overwrite=False,
-                dimension_separator="/"
-            )
+            # mask_zarr = zarr.create(
+            #     shape=data_zyx.shape,
+            #     chunks=cs,
+            #     dtype=label_dtype,
+            #     store=write_store,
+            #     overwrite=False,
+            #     dimension_separator="/"
+            # )
 
             logger.info(
                f"mask will have shape {data_zyx.shape} "
-               f"and chunks {data_zyx.chunks}"
+               # f"and chunks {data_zyx.chunks}"
             )
 
             # Initialize cellpose
@@ -323,41 +332,45 @@ def cellpose_segmentation(
             )
             # image_mask = np.zeros(data_zyx.shape)
             # image_mask = np.zeros(data_zyx.shape, dtype='uint32')
-            shape0 = image_data[0][ind_channel, :, :, :].shape
+            shape0 = data_zyx_raw.shape
             print(shape0)
             print(image_mask.shape)
             #image_mask_1 = resize(image_mask, (image_mask.shape[0], shape0[1], shape0[2]), order=0)
-            if level == 0:
-                image_mask_0 = image_mask.copy()
-            else:
-                image_mask_0 = resize(image_mask, shape0, order=0, anti_aliasing=False, preserve_range=True)
+            # if False: #level == 0:
+            #     image_mask_0 = image_mask.copy()
+            # else:
+            #     image_mask_0 = resize(image_mask, shape0, order=0, anti_aliasing=False, preserve_range=True)
 
             # Compute and store 0-th level to disk
             #print(image_mask_0.shape)
-            da.array(image_mask_0).to_zarr(
-                url=mask_zarr,
-                compute=True,
-            )
+            # da.array(image_mask_0).to_zarr(
+            #     url=mask_zarr,
+            #     compute=True,
+            # )
 
-            # label_name = zarrurl.replace('.zarr', '_labels')
-            # with TiffWriter(label_name + '.ome.tif', bigtiff=True) as tif:
-            #     tif.write(image_mask_0)
+            label_name = zarrurl.replace('.zarr', '_labels')
+            with TiffWriter(label_name + '.ome.tif', bigtiff=True) as tif:
+                tif.write(image_mask)
 
-            logger.info(
-                f"End cellpose_segmentation task for {zarrurl}, "
-                "now building pyramids."
-            )
-
-            # Starting from on-disk highest-resolution data, build and write to disk a
-            # pyramid of coarser levels
-            build_pyramid(
-                zarrurl=f"{zarrurl}labels/{output_label_name}",
-                overwrite=False,
-                num_levels=num_levels,
-                coarsening_xy=coarsening_xy,
-                chunksize=image_data[0][ind_channel, :, :, :].chunksize,
-                aggregation_function=np.max,
-            )
+            im_name = zarrurl.replace('.zarr', '')
+            with TiffWriter(im_name + '.ome.tif', bigtiff=True) as tif:
+                tif.write(data_zyx)
+            #
+            # logger.info(
+            #     f"End cellpose_segmentation task for {zarrurl}, "
+            #     "now building pyramids."
+            # )
+            #
+            # # Starting from on-disk highest-resolution data, build and write to disk a
+            # # pyramid of coarser levels
+            # build_pyramid(
+            #     zarrurl=f"{zarrurl}labels/{output_label_name}",
+            #     overwrite=False,
+            #     num_levels=num_levels,
+            #     coarsening_xy=coarsening_xy,
+            #     chunksize=image_data[0][ind_channel, :, :, :].chunksize,
+            #     aggregation_function=np.max,
+            # )
 
             logger.info(f"End building pyramids, exit")
         else:
@@ -370,7 +383,7 @@ if __name__ == "__main__":
     zarr_directory = "E:\\Nick\\Dropbox (Cole Trapnell's Lab)\\Nick\\pecFin\\HCR_Data\\built_zarr_files2\\" #"/mnt/nas/HCR_data/built_zarr_files/"
     seg_channel_label = 'DAPI'
     level = 0
-    pretrained_model = "C:\\Users\\nlammers\\Projects\\pecFin\\cellpose_models\\DAPI-Pro-5"
+    pretrained_model = "C:\\Users\\nlammers\\Projects\\pecFin\\cellpose_models\\DAPI-3D-1"
     overwrite = True
     model_type = "nuclei"
     output_label_name = "DAPI"

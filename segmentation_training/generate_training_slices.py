@@ -30,7 +30,7 @@ if overwrite_flag:
 
 # get list of datasets with label priors available for revision
 zarr_dir = os.path.join(db_path, 'built_zarr_files', '')
-project_list = glob.glob(zarr_dir + '*.zarrlabelpriors')
+project_list = glob.glob(zarr_dir + '*.zarr')
 
 project_i = 0
 print("Generating training slices...")
@@ -41,14 +41,14 @@ for project_i in tqdm(range(0, len(project_list))):
     r_seed = r_seed_list[project_i]
     np.random.seed(r_seed)  # set random seed
     filename_raw = path_leaf(project_list[project_i])
-    filename = filename_raw.replace(".zarrlabelpriors", "")
+    filename = filename_raw.replace(".zarr", "")
 
     im_read_path = os.path.join(db_path, 'raw', filename[:-2], filename + "_decon.czi")
     # lb_read_path = os.path.join(db_path, 'built_zarr_files', filename + ".zarrlabelpriors")
 
     # set write path
-    write_path = os.path.join(db_path, 'cellpose_training_slices_decon', '')
-    write_path_xy = os.path.join(db_path, 'cellpose_training_slices_decon_xy', '')
+    write_path = os.path.join(db_path, 'cellpose_training_slices_decon2', '')
+    write_path_xy = os.path.join(db_path, 'cellpose_training_slices_decon_xy2', '')
     if not os.path.isdir(write_path):
         os.makedirs(write_path)
     if not os.path.isdir(write_path_xy):
@@ -119,7 +119,7 @@ for project_i in tqdm(range(0, len(project_list))):
             # rescale
             rs_factor = scale_vec[0]/scale_vec[2]
             new_dim = int(rs_factor*dim_vec[0])
-            im_slice = resize(im_slice, [new_dim, dim_vec[2]], order=0, anti_aliasing=False)
+            im_slice = resize(im_slice, [new_dim, dim_vec[2]], order=1, anti_aliasing=False)
             # lb_slice = resize(lb_slice, dim_vec[1:], order=0, anti_aliasing=False, preserve_range=True)
 
         elif slice_id == 2:
@@ -128,7 +128,7 @@ for project_i in tqdm(range(0, len(project_list))):
             # rescale
             rs_factor = scale_vec[0] / scale_vec[1]
             new_dim = int(rs_factor * dim_vec[0])
-            im_slice = resize(im_slice, [new_dim, dim_vec[1]], order=0, anti_aliasing=False)
+            im_slice = resize(im_slice, [new_dim, dim_vec[1]], order=1, anti_aliasing=False)
             # lb_slice = resize(lb_slice, dim_vec[1:], order=0, anti_aliasing=False, preserve_range=True)
 
         # take randon chunk of full slice
