@@ -36,9 +36,15 @@ readPath = os.path.join(db_path, 'raw', filename[:-2], filename + ".czi")
 # import ncolor
 im_path = "E:\\Nick\\Dropbox (Cole Trapnell's Lab)\\Nick\\pecFin\\HCR_Data\\2022_12_15 HCR Hand2 Tbx5a Fgf10a_3.ome.tif"
 image_data = tifffile.imread(im_path)
+
+# new_shape = np.round(np.asarray(images[0].shape)/3).astype(int)
+
+
 #
 lb_path = "E:\\Nick\\Dropbox (Cole Trapnell's Lab)\\Nick\\pecFin\\HCR_Data\\2022_12_15 HCR Hand2 Tbx5a Fgf10a_3_mask.npy"
 label_data = np.load(lb_path)
+
+image_data = resize(image_data, label_data.shape, order=1, anti_aliasing=False)
 
 # imObject = AICSImage(readPath)
 # image_data = np.squeeze(imObject.data)
@@ -93,6 +99,7 @@ label_data = np.load(lb_path)
 # import cv2
 #
 # interpolate so that xyz are isotropic
+label_data[np.where(label_data==1)] = 0
 viewer = napari.view_image(image_data)#, scale=scale_vec)
 labels_layer = viewer.add_labels(label_data)#[0], name='segmentation', scale=scale_vec)
 #
