@@ -5,13 +5,13 @@ import os
 import numpy as np
 from aicsimageio import AICSImage
 from skimage.transform import resize
-from tifffile import imread
+import tifffile
 
 # set parameters
 filename = "2022_12_15 HCR Hand2 Tbx5a Fgf10a_3"
 db_path = "E:\\Nick\\Dropbox (Cole Trapnell's Lab)\\Nick\\pecFin\\HCR_Data\\"
 # db_path = "/Users/nick/Dropbox (Cole Trapnell's Lab)/Nick/pecFin/HCR_Data/"
-readPath = os.path.join(db_path, 'raw', filename[:-2], filename + "_decon.czi")
+readPath = os.path.join(db_path, 'raw', filename[:-2], filename + ".czi")
 # readPath = os.path.join(db_path, 'built_zarr_files2', filename + "_decon.ome.tif")
 # readPathLabels = os.path.join(db_path, 'built_zarr_files2', filename + "_decon_labels.ome.tif")
 # readPathMeta = os.path.join(db_path, 'built_zarr_files2', filename + "_decon.zarr")
@@ -31,8 +31,17 @@ readPath = os.path.join(db_path, 'raw', filename[:-2], filename + "_decon.czi")
 # first node will be the image pixel data
 # image_data = image_node.data
 # load in raw czi file
-imObject = AICSImage(readPath)
-image_data = np.squeeze(imObject.data)
+#
+# import tifffile
+# import ncolor
+im_path = "E:\\Nick\\Dropbox (Cole Trapnell's Lab)\\Nick\\pecFin\\HCR_Data\\2022_12_15 HCR Hand2 Tbx5a Fgf10a_3.ome.tif"
+image_data = tifffile.imread(im_path)
+#
+lb_path = "E:\\Nick\\Dropbox (Cole Trapnell's Lab)\\Nick\\pecFin\\HCR_Data\\2022_12_15 HCR Hand2 Tbx5a Fgf10a_3_mask.npy"
+label_data = np.load(lb_path)
+
+# imObject = AICSImage(readPath)
+# image_data = np.squeeze(imObject.data)
 # image_data = imread(readPath)
 # imObjectLabels = AICSImage(readPathLabels)
 # image_data_lb = np.squeeze(imObjectLabels.data)
@@ -68,19 +77,28 @@ image_data = np.squeeze(imObject.data)
 # #colormaps = [channel_metadata[i]["color"] for i in range(len(channel_metadata))]
 # colormaps = ["red", "blue", "green", "gray"]
 #
-# # extract a chunk of image to work with
-im_chunk = np.squeeze(image_data[-1, 100:140, 1000:1384, 1000:1384])
+# extract a chunk of image to work with
+# im_chunk = np.squeeze(image_data[-1, 100:140, 1000:1384, 1000:1384])
 # shape_curr = im_chunk.shape
+# scale_vec = np.asarray(imObject.physical_pixel_sizes)
 # rs_factor = scale_vec[0] / scale_vec[1]
 # shape_new = np.asarray(shape_curr)
 # shape_new[0] = np.round(shape_new[0]*rs_factor).astype(int)
 # im_chunk_interp = resize(im_chunk, shape_new, order=1, anti_aliasing=False)
-
+#
+#
+# with TiffWriter(db_path + filename + '.ome.tif', bigtiff=True) as tif:
+#     tif.write(im_chunk_interp)
+# AICSImage(im_chunk_interp).save(os.path.join(db_path, filename + "_test_chunk"))
+# import cv2
+#
 # interpolate so that xyz are isotropic
-viewer = napari.view_image(im_chunk)#, scale=scale_vec)
-# labels_layer = viewer.add_labels(label_data)#[0], name='segmentation', scale=scale_vec)
-
+viewer = napari.view_image(image_data)#, scale=scale_vec)
+labels_layer = viewer.add_labels(label_data)#[0], name='segmentation', scale=scale_vec)
+#
 viewer.theme = "dark"
+
+
 
 if __name__ == '__main__':
     napari.run()
