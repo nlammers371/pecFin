@@ -118,7 +118,7 @@ def solve_for_f(C_fit, cp):
 # def predict_quadratic_surface2(xy, DECA, base_point, sphere_point):
 #
 #     # first, solve for B given constraint that tangent plane must pass thrhoug sphere center
-#     plane_vec_norm, D, B = calculate_tangent_plane2(DECA, base_point, sphere_point)
+#     plane_vec_norm, D, B = calculate_tangent_plane2(DECA, base_point, calcsphere_point)
 #     DECAB = [DECA[0], DECA[1], DECA[2], DECA[3], B]
 #
 #     # then solve for F
@@ -533,7 +533,7 @@ def calculate_network_distances(point, G):
 def calculate_adjacency_graph(df, k_nn = 5):
     
     # calculate KD tree and use this to determine k nearest neighbors for each point
-    xyz_array = df[["X", "Y", "X"]]
+    xyz_array = df[["X", "Y", "Z"]]
     # print(xyz_array)
     tree = KDTree(xyz_array)
 
@@ -1336,3 +1336,5 @@ if __name__ == '__main__':
 
     #nucleus_coordinates = pd.read_csv('/Users/nick/test.csv')
     #print(nucleus_coordinates)
+
+
